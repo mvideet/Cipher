@@ -1,0 +1,324 @@
+// Main application entry point for AutoML Desktop
+
+class AutoMLApp {
+    constructor() {
+        this.isInitialized = false;
+        this.backendHealthy = false;
+    }
+
+    // Initialize the application
+    async init() {
+        console.log('Initializing AutoML Desktop Application...');
+
+        try {
+            // Check if backend is available
+            await this.waitForBackend();
+
+            // Initialize API client
+            apiClient.initSession();
+            
+            // Initialize UI manager
+            uiManager.init();
+            
+            // Setup WebSocket connection
+            await this.setupWebSocket();
+            
+            // Setup global event handlers
+            this.setupGlobalHandlers();
+            
+            this.isInitialized = true;
+            console.log('AutoML Desktop Application initialized successfully');
+            
+            uiManager.showNotification('success', 'Application Ready', 'AutoML Desktop is ready to use');
+            
+        } catch (error) {
+            console.error('Failed to initialize application:', error);
+            this.showBackendError(error);
+        }
+    }
+
+    // Wait for backend to be available
+    async waitForBackend(maxAttempts = 30, interval = 1000) {
+        console.log('Waiting for backend to be available...');
+        
+        for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+            try {
+                const health = await apiClient.checkHealth();
+                console.log('Backend health check successful:', health);
+                this.backendHealthy = true;
+                return health;
+            } catch (error) {
+                console.log(`Backend health check attempt ${attempt}/${maxAttempts} failed:`, error.message);
+                
+                if (attempt === maxAttempts) {
+                    throw new Error('Backend is not available after maximum attempts');
+                }
+                
+                // Wait before next attempt
+                await new Promise(resolve => setTimeout(resolve, interval));
+            }
+        }
+    }
+
+    // Setup WebSocket connection and event handlers
+    async setupWebSocket() {
+        try {
+            await apiClient.connectWebSocket();
+            
+            // Handle training progress updates
+            apiClient.addEventListener('trial_update', (data) => {
+                this.handleTrialUpdate(data);
+            });
+            
+            // Handle family completion
+            apiClient.addEventListener('family_complete', (data) => {
+                this.handleFamilyComplete(data);
+            });
+            
+            // Handle training completion
+            apiClient.addEventListener('training_complete', (data) => {
+                this.handleTrainingComplete(data);
+            });
+            
+            // Handle errors
+            apiClient.addEventListener('error', (data) => {
+                this.handleError(data);
+            });
+            
+            // Handle deployment completion
+            apiClient.addEventListener('deployment_complete', (data) => {
+                this.handleDeploymentComplete(data);
+            });
+            
+        } catch (error) {
+            console.warn('WebSocket connection failed:', error);
+            uiManager.showNotification('warning', 'Connection Warning', 'Real-time updates may not be available');
+        }
+    }
+
+    // Handle trial update from WebSocket
+    handleTrialUpdate(data) {
+        console.log('Trial update received:', data);
+        
+        // Add to training logs
+        uiManager.addTrainingLog(data);
+        
+        // Update family progress
+        uiManager.updateFamilyProgress(data.family, {
+            status: 'running',
+            trial: data.trial,
+            val_metric: data.val_metric
+        });
+        
+        // Update overall progress
+        this.updateOverallProgress();
+    }
+
+    // Handle family completion
+    handleFamilyComplete(data) {
+        console.log('Family completed:', data);
+        uiManager.updateFamilyProgress(data.family, {
+            status: 'completed'
+        });
+    }
+
+    // Handle training completion
+    handleTrainingComplete(data) {
+        console.log('Training completed:', data);
+        
+        // Update ALL family statuses to completed
+        const families = ['baseline', 'lightgbm', 'mlp'];
+        families.forEach(family => {
+            uiManager.updateFamilyProgress(family, {
+                status: 'completed'
+            });
+        });
+        
+        // Show training results
+        uiManager.showTrainingResults(data);
+        
+        // Update overall progress to 100%
+        this.setOverallProgress(100);
+    }
+
+    // Handle errors from WebSocket
+    handleError(data) {
+        console.error('Error received from backend:', data);
+        uiManager.showNotification('error', 'Training Error', data.message || 'An error occurred during training');
+        uiManager.updateSessionStatus('error', 'Error occurred');
+    }
+
+    // Handle deployment completion
+    handleDeploymentComplete(data) {
+        console.log('Deployment completed:', data);
+        uiManager.showDeploymentResults(data);
+    }
+
+    // Update overall progress based on family progress
+    updateOverallProgress() {
+        const families = ['baseline', 'lightgbm', 'mlp'];
+        const totalFamilies = families.length;
+        const maxTrialsPerFamily = 20; // From settings
+        
+        let totalProgress = 0;
+        
+        families.forEach(family => {
+            const progress = uiManager.familyProgress[family];
+            if (progress) {
+                const familyProgress = Math.min(progress.trials / maxTrialsPerFamily, 1);
+                totalProgress += familyProgress;
+            }
+        });
+        
+        const overallProgress = (totalProgress / totalFamilies) * 100;
+        this.setOverallProgress(overallProgress);
+    }
+
+    // Set overall progress
+    setOverallProgress(percentage) {
+        const progressBar = document.getElementById('overallProgress');
+        const progressText = document.getElementById('overallProgressText');
+        
+        if (progressBar && progressText) {
+            progressBar.style.width = `${percentage}%`;
+            progressText.textContent = `${Math.round(percentage)}%`;
+        }
+    }
+
+    // Setup global event handlers
+    setupGlobalHandlers() {
+        // Handle window beforeunload
+        window.addEventListener('beforeunload', () => {
+            apiClient.disconnect();
+        });
+        
+        // Handle focus/blur for connection management
+        window.addEventListener('focus', () => {
+            if (this.backendHealthy && !apiClient.websocket) {
+                this.setupWebSocket().catch(console.error);
+            }
+        });
+        
+        // Handle keyboard shortcuts
+        document.addEventListener('keydown', (e) => {
+            this.handleKeyboardShortcuts(e);
+        });
+        
+        // Handle drag and drop on window
+        window.addEventListener('dragover', (e) => {
+            e.preventDefault();
+        });
+        
+        window.addEventListener('drop', (e) => {
+            e.preventDefault();
+            
+            // Only handle if we're on the data tab
+            if (uiManager.currentTab === 'data') {
+                const files = e.dataTransfer.files;
+                if (files.length > 0) {
+                    uiManager.handleFileSelection(files[0]);
+                }
+            }
+        });
+    }
+
+    // Handle keyboard shortcuts
+    handleKeyboardShortcuts(e) {
+        // Ctrl/Cmd + N: New session
+        if ((e.ctrlKey || e.metaKey) && e.key === 'n') {
+            e.preventDefault();
+            uiManager.startNewSession();
+        }
+        
+        // Ctrl/Cmd + Enter: Start training (if on data tab)
+        if ((e.ctrlKey || e.metaKey) && e.key === 'Enter' && uiManager.currentTab === 'data') {
+            e.preventDefault();
+            const startBtn = document.getElementById('startTrainingBtn');
+            if (!startBtn.disabled) {
+                uiManager.startTraining();
+            }
+        }
+        
+        // Tab navigation with Ctrl/Cmd + 1-4
+        if (e.ctrlKey || e.metaKey) {
+            const tabKeys = {
+                '1': 'data',
+                '2': 'training',
+                '3': 'results',
+                '4': 'deployment'
+            };
+            
+            if (tabKeys[e.key]) {
+                e.preventDefault();
+                uiManager.switchTab(tabKeys[e.key]);
+            }
+        }
+    }
+
+    // Show backend error
+    showBackendError(error) {
+        const errorMessage = `
+            <div class="backend-error">
+                <h2>Backend Connection Error</h2>
+                <p>Failed to connect to the AutoML backend server.</p>
+                <div class="error-details">
+                    <strong>Error:</strong> ${error.message}
+                </div>
+                <div class="error-actions">
+                    <button onclick="location.reload()" class="btn btn-primary">
+                        <i class="fas fa-refresh"></i>
+                        Retry Connection
+                    </button>
+                </div>
+                <div class="error-help">
+                    <h3>Troubleshooting:</h3>
+                    <ul>
+                        <li>Ensure Python and dependencies are installed</li>
+                        <li>Check that the backend server is running</li>
+                        <li>Verify the OPENAI_API_KEY is set (if required)</li>
+                        <li>Try restarting the application</li>
+                    </ul>
+                </div>
+            </div>
+        `;
+        
+        document.querySelector('.content-area').innerHTML = errorMessage;
+        uiManager.updateSessionStatus('error', 'Backend unavailable');
+    }
+
+    // Get application status
+    getStatus() {
+        return {
+            initialized: this.isInitialized,
+            backendHealthy: this.backendHealthy,
+            sessionId: apiClient.sessionId,
+            currentTab: uiManager.currentTab,
+            currentRunId: uiManager.currentRunId,
+            websocketConnected: apiClient.websocket && apiClient.websocket.readyState === WebSocket.OPEN
+        };
+    }
+
+    // Cleanup resources
+    cleanup() {
+        apiClient.disconnect();
+        console.log('AutoML Desktop Application cleaned up');
+    }
+}
+
+// Initialize application when DOM is ready
+document.addEventListener('DOMContentLoaded', async () => {
+    console.log('DOM loaded, initializing AutoML Desktop...');
+    
+    // Create global app instance
+    window.automlApp = new AutoMLApp();
+    
+    // Initialize the application
+    await window.automlApp.init();
+});
+
+// Handle app closing
+window.addEventListener('beforeunload', () => {
+    if (window.automlApp) {
+        window.automlApp.cleanup();
+    }
+}); 

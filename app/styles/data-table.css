@@ -1,0 +1,295 @@
+/* Data table styles for AutoML Desktop */
+
+.preview-stats {
+    display: flex;
+    gap: 24px;
+    margin-bottom: 16px;
+    padding: 12px 16px;
+    background: #f8fafc;
+    border-radius: 6px;
+    font-size: 14px;
+}
+
+.preview-stats span {
+    color: #64748b;
+}
+
+.preview-stats strong {
+    color: #1e293b;
+}
+
+.table-wrapper {
+    overflow-x: auto;
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    max-height: 400px;
+    overflow-y: auto;
+}
+
+.data-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 14px;
+    background: white;
+}
+
+.data-table th,
+.data-table td {
+    padding: 12px 16px;
+    text-align: left;
+    border-bottom: 1px solid #f1f5f9;
+    max-width: 200px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.data-table th {
+    background: #f8fafc;
+    font-weight: 600;
+    color: #374151;
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    border-bottom: 2px solid #e5e7eb;
+}
+
+.data-table tbody tr:hover {
+    background: #f9fafb;
+}
+
+.data-table td {
+    color: #6b7280;
+}
+
+/* Family progress details */
+.family-details {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.family-stat {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 14px;
+}
+
+.family-stat .label {
+    color: #64748b;
+    font-weight: 500;
+}
+
+.family-stat .value {
+    color: #1e293b;
+    font-weight: 600;
+}
+
+/* Backend error styles */
+.backend-error {
+    max-width: 600px;
+    margin: 64px auto;
+    padding: 32px;
+    background: white;
+    border-radius: 12px;
+    border: 1px solid #e2e8f0;
+    text-align: center;
+}
+
+.backend-error h2 {
+    color: #dc2626;
+    margin-bottom: 16px;
+}
+
+.backend-error p {
+    color: #64748b;
+    margin-bottom: 24px;
+}
+
+.error-details {
+    background: #fef2f2;
+    border: 1px solid #fecaca;
+    border-radius: 6px;
+    padding: 16px;
+    margin-bottom: 24px;
+    text-align: left;
+}
+
+.error-details strong {
+    color: #dc2626;
+}
+
+.error-actions {
+    margin-bottom: 32px;
+}
+
+.error-help {
+    text-align: left;
+    background: #f8fafc;
+    padding: 20px;
+    border-radius: 8px;
+    border-left: 4px solid #3b82f6;
+}
+
+.error-help h3 {
+    color: #1e293b;
+    margin-bottom: 12px;
+}
+
+.error-help ul {
+    color: #64748b;
+    margin-left: 20px;
+}
+
+.error-help li {
+    margin-bottom: 8px;
+}
+
+/* Additional responsive styles */
+@media (max-width: 768px) {
+    .data-table th,
+    .data-table td {
+        padding: 8px 12px;
+        font-size: 13px;
+        max-width: 120px;
+    }
+    
+    .preview-stats {
+        flex-direction: column;
+        gap: 8px;
+        font-size: 13px;
+    }
+    
+    .backend-error {
+        margin: 32px 16px;
+        padding: 24px;
+    }
+    
+    .error-help {
+        padding: 16px;
+    }
+}
+
+/* Loading spinner for family cards */
+.family-card.loading {
+    opacity: 0.7;
+}
+
+.family-card.loading::after {
+    content: '';
+    position: absolute;
+    top: 50%;
+    right: 16px;
+    width: 16px;
+    height: 16px;
+    border: 2px solid #e2e8f0;
+    border-top: 2px solid #3b82f6;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+    transform: translateY(-50%);
+}
+
+/* Enhanced notification styles */
+.notification {
+    position: relative;
+    overflow: hidden;
+}
+
+.notification::before {
+    content: '';
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 3px;
+    background: linear-gradient(90deg, transparent, rgba(59, 130, 246, 0.3), transparent);
+    animation: progress 5s linear forwards;
+}
+
+@keyframes progress {
+    from { transform: translateX(-100%); }
+    to { transform: translateX(100%); }
+}
+
+/* Enhanced button states */
+.btn:focus {
+    outline: none;
+    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+}
+
+.btn:active {
+    transform: translateY(1px);
+}
+
+/* Progress bar enhancements */
+.progress-bar {
+    position: relative;
+    background: linear-gradient(90deg, #f1f5f9, #e2e8f0);
+}
+
+.progress-fill {
+    background: linear-gradient(90deg, #3b82f6, #1d4ed8);
+    position: relative;
+    overflow: hidden;
+}
+
+.progress-fill::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.3), transparent);
+    animation: shimmer 2s infinite;
+}
+
+@keyframes shimmer {
+    0% { transform: translateX(-100%); }
+    100% { transform: translateX(100%); }
+}
+
+/* Enhanced file upload area */
+.upload-area.processing {
+    border-color: #3b82f6;
+    background: #f0f9ff;
+}
+
+.upload-area.processing .upload-content {
+    opacity: 0.7;
+}
+
+.upload-area.processing::after {
+    content: 'Processing...';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    color: #3b82f6;
+    font-weight: 600;
+}
+
+/* Scrollbar styling */
+.logs-container::-webkit-scrollbar,
+.table-wrapper::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+}
+
+.logs-container::-webkit-scrollbar-track,
+.table-wrapper::-webkit-scrollbar-track {
+    background: #f1f5f9;
+    border-radius: 3px;
+}
+
+.logs-container::-webkit-scrollbar-thumb,
+.table-wrapper::-webkit-scrollbar-thumb {
+    background: #cbd5e1;
+    border-radius: 3px;
+}
+
+.logs-container::-webkit-scrollbar-thumb:hover,
+.table-wrapper::-webkit-scrollbar-thumb:hover {
+    background: #94a3b8;
+} 

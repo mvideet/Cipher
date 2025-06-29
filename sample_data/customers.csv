@@ -1,0 +1,51 @@
+CustomerID,Gender,Age,MonthlyCharges,TotalCharges,Contract,Tenure,HasInternetService,HasPhoneService,Churn
+CUST001,Male,29,65.5,850.25,Month-to-month,12,Yes,Yes,No
+CUST002,Female,45,89.9,2150.75,Two year,24,Yes,No,No
+CUST003,Male,32,55.2,430.8,Month-to-month,8,No,Yes,Yes
+CUST004,Female,28,95.3,1145.6,One year,12,Yes,Yes,No
+CUST005,Male,52,45.8,1876.4,Two year,41,No,No,No
+CUST006,Female,38,78.9,1025.7,Month-to-month,13,Yes,Yes,Yes
+CUST007,Male,41,102.4,3584.0,Two year,35,Yes,Yes,No
+CUST008,Female,33,67.2,537.6,Month-to-month,8,Yes,No,Yes
+CUST009,Male,47,88.5,2832.0,One year,32,Yes,Yes,No
+CUST010,Female,29,54.3,434.4,Month-to-month,8,No,Yes,Yes
+CUST011,Male,36,91.2,2189.8,Two year,24,Yes,Yes,No
+CUST012,Female,42,76.8,1996.8,One year,26,Yes,No,No
+CUST013,Male,31,58.4,467.2,Month-to-month,8,Yes,Yes,Yes
+CUST014,Female,55,112.5,5175.0,Two year,46,Yes,Yes,No
+CUST015,Male,27,49.9,349.3,Month-to-month,7,No,No,Yes
+CUST016,Female,39,83.7,1423.9,One year,17,Yes,Yes,No
+CUST017,Male,44,96.8,3388.0,Two year,35,Yes,Yes,No
+CUST018,Female,35,71.2,854.4,Month-to-month,12,Yes,No,Yes
+CUST019,Male,50,105.6,4224.0,Two year,40,Yes,Yes,No
+CUST020,Female,26,52.1,364.7,Month-to-month,7,No,Yes,Yes
+CUST021,Male,43,89.4,2950.2,One year,33,Yes,Yes,No
+CUST022,Female,37,77.5,1240.0,One year,16,Yes,Yes,No
+CUST023,Male,48,98.2,3634.4,Two year,37,Yes,Yes,No
+CUST024,Female,30,61.8,494.4,Month-to-month,8,Yes,No,Yes
+CUST025,Male,53,108.9,4904.5,Two year,45,Yes,Yes,No
+CUST026,Female,24,44.2,265.2,Month-to-month,6,No,Yes,Yes
+CUST027,Male,40,85.7,2571.0,Two year,30,Yes,Yes,No
+CUST028,Female,46,73.4,1468.0,One year,20,Yes,No,No
+CUST029,Male,34,59.8,717.6,Month-to-month,12,Yes,Yes,Yes
+CUST030,Female,51,94.6,3596.8,Two year,38,Yes,Yes,No
+CUST031,Male,25,47.3,331.1,Month-to-month,7,No,No,Yes
+CUST032,Female,41,81.9,1638.0,One year,20,Yes,Yes,No
+CUST033,Male,56,115.2,5760.0,Two year,50,Yes,Yes,No
+CUST034,Female,28,63.5,508.0,Month-to-month,8,Yes,No,Yes
+CUST035,Male,45,92.4,2772.0,Two year,30,Yes,Yes,No
+CUST036,Female,33,69.8,837.6,Month-to-month,12,Yes,Yes,Yes
+CUST037,Male,49,101.7,3558.0,Two year,35,Yes,Yes,No
+CUST038,Female,27,51.6,361.2,Month-to-month,7,No,Yes,Yes
+CUST039,Male,42,87.3,2619.0,One year,30,Yes,Yes,No
+CUST040,Female,38,75.9,1214.4,One year,16,Yes,No,No
+CUST041,Male,31,57.2,458.4,Month-to-month,8,Yes,Yes,Yes
+CUST042,Female,54,109.8,4939.0,Two year,45,Yes,Yes,No
+CUST043,Male,26,46.7,326.9,Month-to-month,7,No,No,Yes
+CUST044,Female,43,84.6,1692.0,One year,20,Yes,Yes,No
+CUST045,Male,37,72.4,1013.6,Month-to-month,14,Yes,No,Yes
+CUST046,Female,48,97.5,3412.5,Two year,35,Yes,Yes,No
+CUST047,Male,29,55.8,446.4,Month-to-month,8,No,Yes,Yes
+CUST048,Female,44,86.2,2068.8,One year,24,Yes,Yes,No
+CUST049,Male,35,68.9,827.8,Month-to-month,12,Yes,No,Yes
+CUST050,Female,52,103.4,4136.0,Two year,40,Yes,Yes,No

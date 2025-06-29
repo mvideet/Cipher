@@ -1,0 +1,342 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AutoML Desktop</title>
+    <link rel="stylesheet" href="styles/main.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+<body>
+    <div id="app">
+        <!-- Header -->
+        <header class="header">
+            <div class="header-content">
+                <div class="logo">
+                    <i class="fas fa-robot"></i>
+                    <span>AutoML Desktop</span>
+                </div>
+                <div class="header-actions">
+                    <button id="newSessionBtn" class="btn btn-primary">
+                        <i class="fas fa-plus"></i>
+                        New Session
+                    </button>
+                </div>
+            </div>
+        </header>
+
+        <!-- Main Content -->
+        <div class="main-content">
+            <!-- Sidebar -->
+            <aside class="sidebar">
+                <div class="session-info">
+                    <h3>Current Session</h3>
+                    <div id="sessionStatus" class="status-indicator">
+                        <span class="status-dot"></span>
+                        <span class="status-text">Ready</span>
+                    </div>
+                </div>
+
+                <nav class="nav-menu">
+                    <ul>
+                        <li class="nav-item active" data-tab="data">
+                            <i class="fas fa-table"></i>
+                            <span>Data</span>
+                        </li>
+                        <li class="nav-item" data-tab="training">
+                            <i class="fas fa-cogs"></i>
+                            <span>Training</span>
+                        </li>
+                        <li class="nav-item" data-tab="results">
+                            <i class="fas fa-chart-line"></i>
+                            <span>Results</span>
+                        </li>
+                        <li class="nav-item" data-tab="deployment">
+                            <i class="fas fa-rocket"></i>
+                            <span>Deployment</span>
+                        </li>
+                    </ul>
+                </nav>
+
+                <div class="progress-section">
+                    <h4>Training Progress</h4>
+                    <div id="progressContainer" class="progress-container">
+                        <div class="progress-item">
+                            <span>Overall Progress</span>
+                            <div class="progress-bar">
+                                <div id="overallProgress" class="progress-fill" style="width: 0%"></div>
+                            </div>
+                            <span id="overallProgressText">0%</span>
+                        </div>
+                    </div>
+                </div>
+            </aside>
+
+            <!-- Content Area -->
+            <main class="content-area">
+                <!-- Data Tab -->
+                <div id="dataTab" class="tab-content active">
+                    <div class="tab-header">
+                        <h2>Data Upload & Configuration</h2>
+                        <p>Upload your dataset and describe your ML task</p>
+                    </div>
+
+                    <div class="upload-section">
+                        <div class="upload-area" id="uploadArea">
+                            <div class="upload-content">
+                                <i class="fas fa-cloud-upload-alt"></i>
+                                <h3>Upload Dataset</h3>
+                                <p>Drag & drop a CSV file here or click to browse</p>
+                                <button class="btn btn-primary" id="browseFileBtn">
+                                    <i class="fas fa-folder-open"></i>
+                                    Browse Files
+                                </button>
+                            </div>
+                            <input type="file" id="fileInput" accept=".csv" style="display: none;">
+                        </div>
+
+                        <div id="fileInfo" class="file-info" style="display: none;">
+                            <div class="file-details">
+                                <i class="fas fa-file-csv"></i>
+                                <div>
+                                    <div class="file-name"></div>
+                                    <div class="file-stats"></div>
+                                </div>
+                                <button class="btn btn-secondary" id="removeFileBtn">
+                                    <i class="fas fa-times"></i>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="prompt-section">
+                        <h3>Describe Your ML Task</h3>
+                        <div class="prompt-input">
+                            <textarea 
+                                id="promptInput" 
+                                placeholder="Describe what you want to predict. For example: 'Predict customer churn. Optimize for recall. Use max 5 features. Exclude CustomerID.'"
+                                rows="4"
+                            ></textarea>
+                        </div>
+                        <div class="prompt-actions">
+                            <button class="btn btn-primary btn-large" id="startTrainingBtn" disabled>
+                                <i class="fas fa-play"></i>
+                                Start ML Pipeline
+                            </button>
+                        </div>
+                    </div>
+
+                    <div id="dataPreview" class="data-preview" style="display: none;">
+                        <h3>Data Preview</h3>
+                        <div class="preview-content">
+                            <div id="previewTable"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Training Tab -->
+                <div id="trainingTab" class="tab-content">
+                    <div class="tab-header">
+                        <h2>Training Progress</h2>
+                        <p>Real-time training progress and logs</p>
+                    </div>
+
+                    <div class="training-overview">
+                        <div class="training-cards">
+                            <div class="training-card">
+                                <h4>Task Configuration</h4>
+                                <div id="taskConfig" class="config-details">
+                                    <div class="config-item">
+                                        <span class="label">Task Type:</span>
+                                        <span id="taskType">-</span>
+                                    </div>
+                                    <div class="config-item">
+                                        <span class="label">Target:</span>
+                                        <span id="targetColumn">-</span>
+                                    </div>
+                                    <div class="config-item">
+                                        <span class="label">Metric:</span>
+                                        <span id="optimizationMetric">-</span>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="training-card">
+                                <h4>Data Profile</h4>
+                                <div id="dataProfileSummary" class="config-details">
+                                    <div class="config-item">
+                                        <span class="label">Rows:</span>
+                                        <span id="dataRows">-</span>
+                                    </div>
+                                    <div class="config-item">
+                                        <span class="label">Columns:</span>
+                                        <span id="dataColumns">-</span>
+                                    </div>
+                                    <div class="config-item">
+                                        <span class="label">Issues:</span>
+                                        <span id="dataIssues">-</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="training-logs">
+                        <h3>Training Logs</h3>
+                        <div id="trainingLogs" class="logs-container">
+                            <div class="log-placeholder">
+                                <i class="fas fa-info-circle"></i>
+                                <p>Training logs will appear here once training starts</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="family-progress">
+                        <h3>Model Family Progress</h3>
+                        <div id="familyProgress" class="family-grid">
+                            <!-- Family progress cards will be added dynamically -->
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Results Tab -->
+                <div id="resultsTab" class="tab-content">
+                    <div class="tab-header">
+                        <h2>Training Results</h2>
+                        <p>Model performance and explanations</p>
+                    </div>
+
+                    <div id="resultsContent" class="results-content">
+                        <div class="results-placeholder">
+                            <i class="fas fa-chart-line"></i>
+                            <h3>No Results Yet</h3>
+                            <p>Results will appear here after training completes</p>
+                        </div>
+                    </div>
+
+                    <div id="modelResults" class="model-results" style="display: none;">
+                        <div class="results-summary">
+                            <div class="best-model-card">
+                                <h3>Best Model</h3>
+                                <div class="model-info">
+                                    <div class="model-detail">
+                                        <span class="label">Family:</span>
+                                        <span id="bestFamily">-</span>
+                                    </div>
+                                    <div class="model-detail">
+                                        <span class="label">Validation Score:</span>
+                                        <span id="bestScore">-</span>
+                                    </div>
+                                    <div class="model-detail">
+                                        <span class="label">Training Score:</span>
+                                        <span id="trainScore">-</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="explanations">
+                            <h3>Model Explanations</h3>
+                            <div class="explanation-content">
+                                <div class="feature-importance">
+                                    <h4>Feature Importance</h4>
+                                    <div id="featureImportanceChart" class="chart-container">
+                                        <!-- Chart will be rendered here -->
+                                    </div>
+                                </div>
+                                <div class="text-explanation">
+                                    <h4>Key Insights</h4>
+                                    <div id="textExplanation" class="explanation-text">
+                                        <!-- Text explanation will be added here -->
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Deployment Tab -->
+                <div id="deploymentTab" class="tab-content">
+                    <div class="tab-header">
+                        <h2>Model Deployment</h2>
+                        <p>Deploy your trained model as a Docker container</p>
+                    </div>
+
+                    <div id="deploymentContent" class="deployment-content">
+                        <div class="deployment-placeholder">
+                            <i class="fas fa-rocket"></i>
+                            <h3>Ready to Deploy</h3>
+                            <p>Complete training to enable deployment</p>
+                            <button class="btn btn-primary btn-large" id="deployBtn" disabled>
+                                <i class="fas fa-rocket"></i>
+                                Deploy Model
+                            </button>
+                        </div>
+                    </div>
+
+                    <div id="deploymentResults" class="deployment-results" style="display: none;">
+                        <div class="deployment-success">
+                            <i class="fas fa-check-circle"></i>
+                            <h3>Deployment Successful!</h3>
+                        </div>
+
+                        <div class="deployment-details">
+                            <h4>Deployment Information</h4>
+                            <div class="deployment-info">
+                                <div class="info-item">
+                                    <span class="label">Docker Tag:</span>
+                                    <span id="dockerTag" class="code">-</span>
+                                </div>
+                                <div class="info-item">
+                                    <span class="label">Image Size:</span>
+                                    <span id="imageSize">-</span>
+                                </div>
+                                <div class="info-item">
+                                    <span class="label">Build Time:</span>
+                                    <span id="buildTime">-</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="deployment-commands">
+                            <h4>Deployment Commands</h4>
+                            <div class="command-box">
+                                <code id="deploymentCommand">-</code>
+                                <button class="btn btn-secondary copy-btn" data-copy-target="#deploymentCommand">
+                                    <i class="fas fa-copy"></i>
+                                </button>
+                            </div>
+                        </div>
+
+                        <div class="deployment-actions">
+                            <button class="btn btn-primary" id="downloadAuditBtn">
+                                <i class="fas fa-download"></i>
+                                Download Audit Report
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </main>
+        </div>
+    </div>
+
+    <!-- Loading Overlay -->
+    <div id="loadingOverlay" class="loading-overlay" style="display: none;">
+        <div class="loading-content">
+            <div class="spinner"></div>
+            <h3 id="loadingText">Processing...</h3>
+            <p id="loadingSubtext">Please wait</p>
+        </div>
+    </div>
+
+    <!-- Notification Container -->
+    <div id="notifications" class="notifications-container"></div>
+
+    <!-- Scripts -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="scripts/utils.js"></script>
+    <script src="scripts/api.js"></script>
+    <script src="scripts/ui.js"></script>
+    <script src="scripts/app.js"></script>
+</body>
+</html> 
