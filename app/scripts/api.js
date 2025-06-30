@@ -7,6 +7,8 @@ class APIClient {
         this.sessionId = null;
         this.websocket = null;
         this.listeners = new Map();
+        this.reconnectAttempts = 0;
+        this.isReconnecting = false;
     }
 
     // Initialize session
@@ -20,15 +22,27 @@ class APIClient {
         if (this.websocket && this.websocket.readyState === WebSocket.OPEN) {
             return Promise.resolve();
         }
+        
+        // Prevent multiple connection attempts
+        if (this.isConnecting) {
+            return this.connectionPromise;
+        }
 
-        return new Promise((resolve, reject) => {
+        this.isConnecting = true;
+
+        this.connectionPromise = new Promise((resolve, reject) => {
             const wsUrl = `${this.wsURL}/${this.sessionId}`;
             console.log('Connecting to WebSocket:', wsUrl);
 
             this.websocket = new WebSocket(wsUrl);
+            
+            let connectionTimeout;
 
             this.websocket.onopen = () => {
+                clearTimeout(connectionTimeout);
                 console.log('WebSocket connected');
+                this.isConnecting = false;
+                this.reconnectAttempts = 0; // Reset on successful connection
                 resolve();
             };
 
@@ -43,28 +57,52 @@ class APIClient {
 
             this.websocket.onclose = () => {
                 console.log('WebSocket disconnected');
+                clearTimeout(connectionTimeout);
                 this.websocket = null;
-                
-                // Attempt to reconnect after 3 seconds
-                setTimeout(() => {
-                    if (this.sessionId) {
-                        this.connectWebSocket();
-                    }
-                }, 3000);
+                this.isConnecting = false;
+                this.attemptReconnect();
             };
 
             this.websocket.onerror = (error) => {
                 console.error('WebSocket error:', error);
+                clearTimeout(connectionTimeout);
+                this.isConnecting = false;
                 reject(error);
+                this.attemptReconnect();
             };
 
             // Timeout after 10 seconds
-            setTimeout(() => {
+            connectionTimeout = setTimeout(() => {
                 if (this.websocket && this.websocket.readyState !== WebSocket.OPEN) {
+                    this.websocket.close(); // Close the attempting connection
+                    this.isConnecting = false;
                     reject(new Error('WebSocket connection timeout'));
+                    this.attemptReconnect();
                 }
             }, 10000);
         });
+
+        return this.connectionPromise;
+    }
+
+    // Attempt to reconnect with exponential backoff
+    attemptReconnect() {
+        if (this.isReconnecting || !this.sessionId) return;
+
+        this.isReconnecting = true;
+        this.reconnectAttempts++;
+        
+        // Exponential backoff: 2s, 4s, 8s, 16s, 30s max
+        const delay = Math.min(30000, Math.pow(2, this.reconnectAttempts) * 1000);
+        
+        console.log(`Attempting to reconnect in ${delay / 1000}s...`);
+
+        setTimeout(() => {
+            this.isReconnecting = false;
+            this.connectWebSocket().catch(err => {
+                console.error("Reconnect attempt failed:", err.message);
+            });
+        }, delay);
     }
 
     // Handle WebSocket messages

@@ -191,13 +191,20 @@ class TrainingOrchestrator:
             max_trials = min(max_trials, 5)
             logger.info(f"Small dataset detected, reducing Optuna trials to {max_trials}")
         
+        # Run Optuna study in a separate thread to avoid blocking asyncio event loop
+        loop = asyncio.get_running_loop()
+        
         for trial_num in range(max_trials):
             if time.time() - self.start_time > self.max_time_seconds:
                 logger.info(f"Time budget exceeded for {family}")
                 break
             
             try:
-                study.optimize(objective, n_trials=1, timeout=300)  # 5 min per trial max
+                # This is a blocking call, so we run it in a thread
+                await loop.run_in_executor(
+                    None,  # Use default executor
+                    lambda: study.optimize(objective, n_trials=1, timeout=300)
+                )
                 
                 # Send progress update
                 await self._send_trial_update(family, trial_num + 1, study.best_value)

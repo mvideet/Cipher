@@ -568,12 +568,16 @@ class EnhancedTrainingOrchestrator:
         # Run optimization with time budget per model
         max_trials = min(20, max(5, 60 // len(architecture.get('config', {}))))
         
+        loop = asyncio.get_running_loop()
         for trial_num in range(max_trials):
             if time.time() - self.start_time > self.max_time_seconds * 0.8:  # Reserve time for ensemble
                 break
             
             try:
-                study.optimize(objective, n_trials=1, timeout=120)
+                await loop.run_in_executor(
+                    None,
+                    lambda: study.optimize(objective, n_trials=1, timeout=120)
+                )
                 await self._send_architecture_trial_update(model_name, trial_num + 1, study.best_value)
             except Exception as e:
                 logger.error(f"Trial {trial_num} failed for {model_name}", error=str(e))

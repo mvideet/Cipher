@@ -74,126 +74,160 @@ async def start_ml_session(
     logger.info("Starting ML session", session_id=session_id, prompt=prompt)
     
     try:
-        # Validate file size
-        file_content = await file.read()
-        file_size_mb = len(file_content) / (1024 * 1024)
+        # Save uploaded file to a temporary location first
+        run_id = str(uuid.uuid4())
+        temp_file_path = await save_uploaded_file(file, run_id)
         
-        if file_size_mb > settings.MAX_FILE_SIZE_MB:
-            raise HTTPException(
-                status_code=413,
-                detail=f"File too large. Max size: {settings.MAX_FILE_SIZE_MB}MB"
+        # Immediately schedule the background processing task
+        asyncio.create_task(
+            _process_and_train_pipeline(
+                run_id=run_id,
+                session_id=session_id,
+                temp_file_path=temp_file_path,
+                prompt=prompt,
+                enhanced=False
             )
+        )
         
-        # Create dataset hash for deduplication
-        dataset_hash = hashlib.sha1(file_content).hexdigest()
+        # Return a response to the client immediately
+        return {
+            "run_id": run_id,
+            "status": "processing_started",
+            "message": "File uploaded. Processing and training will start shortly."
+        }
         
-        # Load and validate dataset
+    except Exception as e:
+        logger.error("Failed to start ML session", error=str(e), exc_info=True)
+        # Use traceback to get more detailed error info
+        detailed_error = traceback.format_exc()
+        await websocket_manager.broadcast_error(
+            session_id, f"Failed to initiate session: {str(e)}\n{detailed_error}"
+        )
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+
+async def _process_and_train_pipeline(
+    run_id: str,
+    session_id: str,
+    temp_file_path: str,
+    prompt: str,
+    enhanced: bool
+):
+    """Full pipeline: data processing and model training in the background."""
+    
+    # This function now runs entirely in the background
+    with Session(engine) as db:
         try:
+            await websocket_manager.broadcast_training_status(
+                session_id, {"status": "preprocessing", "message": "Reading and processing dataset..."}
+            )
+
+            # --- Start of previously blocking code ---
+            with open(temp_file_path, 'rb') as f:
+                file_content = f.read()
+
+            file_size_mb = len(file_content) / (1024 * 1024)
+            if file_size_mb > settings.MAX_FILE_SIZE_MB:
+                raise ValueError(f"File too large. Max size: {settings.MAX_FILE_SIZE_MB}MB")
+
+            dataset_hash = hashlib.sha1(file_content).hexdigest()
+
             import io
             df = pd.read_csv(io.BytesIO(file_content))
-        except Exception as e:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Failed to read CSV file: {str(e)}"
+            if df.empty:
+                raise ValueError("Dataset is empty")
+            
+            # Create run record
+            run_model = EnhancedRun if enhanced else Run
+            run = run_model(
+                id=run_id,
+                user_prompt=prompt,
+                dataset_hash=dataset_hash,
+                status="parsing_prompt"
             )
-        
-        if df.empty:
-            raise HTTPException(status_code=400, detail="Dataset is empty")
-        
-        # Create run record
-        run = Run(
-            id=str(uuid.uuid4()),
-            user_prompt=prompt,
-            dataset_hash=dataset_hash,
-            status="parsing_prompt"
-        )
-        db.add(run)
-        db.commit()
-        db.refresh(run)
-        
-        # Parse prompt with GPT-4
-        prompt_parser = PromptParser()
-        dataset_preview = {
-            "columns": df.columns.tolist(),
-            "dtypes": df.dtypes.astype(str).to_dict(),
-            "sample_rows": df.head(5).to_dict(orient="records"),
-            "shape": df.shape
-        }
-        
-        prompt_request = PromptRequest(
-            session_id=session_id,
-            prompt=prompt,
-            dataset_preview=dataset_preview
-        )
-        
-        try:
+            db.add(run)
+            db.commit()
+            db.refresh(run)
+
+            # Parse prompt
+            await websocket_manager.broadcast_training_status(
+                session_id, {"status": "parsing_prompt", "message": "Parsing prompt with AI..."}
+            )
+            prompt_parser = PromptParser()
+            dataset_preview = {
+                "columns": df.columns.tolist(),
+                "dtypes": df.dtypes.astype(str).to_dict(),
+                "sample_rows": df.head(5).to_dict(orient="records"),
+                "shape": df.shape
+            }
+            prompt_request = PromptRequest(
+                session_id=session_id,
+                prompt=prompt,
+                dataset_preview=dataset_preview
+            )
             prompt_response = await prompt_parser.parse_prompt(prompt_request)
+            
+            if prompt_response.clarifications_needed:
+                run.status = "needs_clarification"
+                db.commit()
+                # Notify frontend about clarification (this part of the UI flow might need adjustment)
+                await websocket_manager.broadcast_to_session(session_id, {
+                    "type": "clarification_needed",
+                    "data": {
+                        "run_id": run.id,
+                        "clarifications": prompt_response.clarifications_needed,
+                        "parsed_intent": prompt_response.dict()
+                    }
+                })
+                return # Stop processing until user clarifies
+
+            # Profile the data
+            await websocket_manager.broadcast_training_status(
+                session_id, {"status": "profiling_data", "message": "Analyzing data profile..."}
+            )
+            profiler = DataProfiler()
+            profile = profiler.profile_dataset(df)
+
+            run.status = "training"
+            run.metric = prompt_response.metric
+            db.commit()
+            # --- End of previously blocking code ---
+
+            # Now, call the appropriate training pipeline
+            if enhanced:
+                await _run_enhanced_training_pipeline(
+                    run.id, session_id, temp_file_path, 
+                    prompt_response, profile, db
+                )
+            else:
+                await _run_training_pipeline(
+                    run.id, session_id, temp_file_path,
+                    prompt_response, profile, db
+                )
+
         except Exception as e:
-            run.status = "failed"
-            run.end_ts = datetime.utcnow()
-            db.commit()
+            logger.error("Background processing/training failed", run_id=run_id, error=str(e), exc_info=True)
+            detailed_error = traceback.format_exc()
+            
+            try:
+                # Update run status to failed
+                run = db.get(Run, run_id)
+                if run:
+                    run.status = "failed"
+                    run.end_ts = datetime.utcnow()
+                    db.commit()
+            except Exception as db_error:
+                logger.error("Failed to update run status to failed", run_id=run_id, error=str(db_error))
+
             await websocket_manager.broadcast_error(
-                session_id, f"Failed to parse prompt: {str(e)}"
+                session_id, f"Processing failed: {str(e)}\n\n{detailed_error}"
             )
-            raise HTTPException(status_code=400, detail=str(e))
-        
-        # Check if clarifications needed
-        if prompt_response.clarifications_needed:
-            run.status = "needs_clarification"
-            db.commit()
-            return {
-                "run_id": run.id,
-                "status": "needs_clarification",
-                "clarifications": prompt_response.clarifications_needed,
-                "parsed_intent": {
-                    "task": prompt_response.task,
-                    "target": prompt_response.target,
-                    "metric": prompt_response.metric,
-                    "constraints": prompt_response.constraints
-                }
-            }
-        
-        # Profile the data
-        run.status = "profiling_data"
-        db.commit()
-        
-        profiler = DataProfiler()
-        profile = profiler.profile_dataset(df)
-        
-        # Start training asynchronously
-        run.status = "training"
-        run.metric = prompt_response.metric
-        db.commit()
-        
-        # Save dataset temporarily for training
-        temp_file = settings.TEMP_DIR / f"{run.id}_dataset.csv"
-        df.to_csv(temp_file, index=False)
-        
-        # Schedule training in background
-        asyncio.create_task(
-            _run_training_pipeline(
-                run.id, session_id, str(temp_file), 
-                prompt_response, profile, db
-            )
-        )
-        
-        return {
-            "run_id": run.id,
-            "status": "training_started",
-            "data_profile": profile.dict(),
-            "parsed_intent": {
-                "task": prompt_response.task,
-                "target": prompt_response.target,
-                "metric": prompt_response.metric,
-                "constraints": prompt_response.constraints
-            }
-        }
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error("Failed to start ML session", error=str(e))
-        raise HTTPException(status_code=500, detail="Internal server error")
+        finally:
+            # Cleanup temp file
+            try:
+                os.remove(temp_file_path)
+            except OSError:
+                pass
 
 
 @router.post("/session/{session_id}/start-enhanced")
@@ -208,132 +242,35 @@ async def start_enhanced_ml_session(
     logger.info("Starting enhanced ML session", session_id=session_id, prompt=prompt)
     
     try:
-        # Validate file size
-        file_content = await file.read()
-        file_size_mb = len(file_content) / (1024 * 1024)
+        # Save uploaded file to a temporary location first
+        run_id = str(uuid.uuid4())
+        temp_file_path = await save_uploaded_file(file, run_id)
         
-        if file_size_mb > settings.MAX_FILE_SIZE_MB:
-            raise HTTPException(
-                status_code=413,
-                detail=f"File too large. Max size: {settings.MAX_FILE_SIZE_MB}MB"
-            )
-        
-        # Create dataset hash for deduplication
-        dataset_hash = hashlib.sha1(file_content).hexdigest()
-        
-        # Load and validate dataset
-        try:
-            import io
-            df = pd.read_csv(io.BytesIO(file_content))
-        except Exception as e:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Failed to read CSV file: {str(e)}"
-            )
-        
-        if df.empty:
-            raise HTTPException(status_code=400, detail="Dataset is empty")
-        
-        # Create enhanced run record
-        run = EnhancedRun(
-            id=str(uuid.uuid4()),
-            user_prompt=prompt,
-            dataset_hash=dataset_hash,
-            status="parsing_prompt"
-        )
-        db.add(run)
-        db.commit()
-        db.refresh(run)
-        
-        # Parse prompt with GPT-4
-        prompt_parser = PromptParser()
-        dataset_preview = {
-            "columns": df.columns.tolist(),
-            "dtypes": df.dtypes.astype(str).to_dict(),
-            "sample_rows": df.head(5).to_dict(orient="records"),
-            "shape": df.shape
-        }
-        
-        prompt_request = PromptRequest(
-            session_id=session_id,
-            prompt=prompt,
-            dataset_preview=dataset_preview
-        )
-        
-        try:
-            prompt_response = await prompt_parser.parse_prompt(prompt_request)
-        except Exception as e:
-            run.status = "failed"
-            run.end_ts = datetime.utcnow()
-            db.commit()
-            await websocket_manager.broadcast_error(
-                session_id, f"Failed to parse prompt: {str(e)}"
-            )
-            raise HTTPException(status_code=400, detail=str(e))
-        
-        # Check if clarifications needed
-        if prompt_response.clarifications_needed:
-            run.status = "needs_clarification"
-            db.commit()
-            return {
-                "run_id": run.id,
-                "status": "needs_clarification",
-                "clarifications": prompt_response.clarifications_needed,
-                "parsed_intent": {
-                    "task": prompt_response.task,
-                    "target": prompt_response.target,
-                    "metric": prompt_response.metric,
-                    "constraints": prompt_response.constraints
-                }
-            }
-        
-        # Profile the data
-        run.status = "profiling_data"
-        db.commit()
-        
-        profiler = DataProfiler()
-        profile = profiler.profile_dataset(df)
-        
-        # Start enhanced training asynchronously
-        run.status = "selecting_models"
-        run.metric = prompt_response.metric
-        db.commit()
-        
-        # Save dataset temporarily for training
-        temp_file = settings.TEMP_DIR / f"{run.id}_dataset.csv"
-        df.to_csv(temp_file, index=False)
-        
-        # Schedule enhanced training in background
+        # Immediately schedule the background processing task
         asyncio.create_task(
-            _run_enhanced_training_pipeline(
-                run.id, session_id, str(temp_file), 
-                prompt_response, profile, db
+            _process_and_train_pipeline(
+                run_id=run_id,
+                session_id=session_id,
+                temp_file_path=temp_file_path,
+                prompt=prompt,
+                enhanced=True
             )
         )
         
+        # Return a response to the client immediately
         return {
-            "run_id": run.id,
-            "status": "enhanced_training_started",
-            "data_profile": profile.dict(),
-            "parsed_intent": {
-                "task": prompt_response.task,
-                "target": prompt_response.target,
-                "metric": prompt_response.metric,
-                "constraints": prompt_response.constraints
-            },
-            "enhanced_features": [
-                "LLM-guided model selection",
-                "Multiple architecture testing per model",
-                "Neural architecture search",
-                "Intelligent ensemble creation"
-            ]
+            "run_id": run_id,
+            "status": "processing_started",
+            "message": "File uploaded. Processing and enhanced training will start shortly."
         }
         
-    except HTTPException:
-        raise
     except Exception as e:
-        logger.error("Failed to start enhanced ML session", error=str(e))
-        raise HTTPException(status_code=500, detail="Internal server error")
+        logger.error("Failed to start enhanced ML session", error=str(e), exc_info=True)
+        detailed_error = traceback.format_exc()
+        await websocket_manager.broadcast_error(
+            session_id, f"Failed to initiate enhanced session: {str(e)}\n{detailed_error}"
+        )
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
 
 @router.post("/session/{session_id}/clarify")
