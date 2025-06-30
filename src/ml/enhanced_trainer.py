@@ -635,257 +635,155 @@ class EnhancedTrainingOrchestrator:
         metric: str,
         constraints: Dict[str, Any]
     ) -> ModelArtifact:
-        """Train a PyTorch neural network architecture with proper preprocessing"""
-        
-        import torch
-        import torch.nn as nn
-        from pathlib import Path
-        import pickle
-        import numpy as np
-        from sklearn.preprocessing import StandardScaler, LabelEncoder
+        """Train a PyTorch neural network architecture using the existing PyTorchTrainer"""
         
         model_name = f"{model_rec.model_type}_{architecture['name']}"
-        logger.info(f"🧠 Starting PyTorch neural network training: {model_name}",
+        logger.info(f"🧠 Training PyTorch neural network: {model_name}",
                    architecture_config=architecture,
                    input_shape=X_train.shape,
                    target_shape=y_train.shape,
                    task_type=task_type,
                    metric=metric)
         
-        # Use PyTorchTrainer's preprocessing for neural networks
-        from .pytorch_trainer import PyTorchTrainer
-        
-        # Create a temporary PyTorchTrainer instance for data preprocessing
-        pytorch_trainer = PyTorchTrainer(self.run_id, self.session_id, self.websocket_manager)
-        
-        # Combine train and validation data for preprocessing
-        X_combined = pd.concat([X_train, X_val], axis=0, ignore_index=True)
-        y_combined = pd.concat([y_train, y_val], axis=0, ignore_index=True)
-        
-        # Create temporary dataframe for preprocessing
-        temp_df = X_combined.copy()
-        temp_df[y_train.name or 'target'] = y_combined
-        
-        logger.info(f"🔄 Preprocessing data for {model_name}",
-                   combined_shape=temp_df.shape,
-                   categorical_cols=temp_df.select_dtypes(include=['object', 'category']).columns.tolist(),
-                   numeric_cols=temp_df.select_dtypes(include=[np.number]).columns.tolist())
-        
-        # Use PyTorch preprocessing
-        X_processed, y_processed = pytorch_trainer._prepare_pytorch_data(
-            temp_df, y_train.name or 'target', constraints
-        )
-        
-        logger.info(f"✅ Data preprocessing completed for {model_name}",
-                   original_features=X_train.shape[1],
-                   processed_features=X_processed.shape[1],
-                   feature_expansion_ratio=f"{X_processed.shape[1]/X_train.shape[1]:.2f}x")
-        
-        # Split back into train/val
-        train_size = len(X_train)
-        X_train_processed = X_processed[:train_size]
-        X_val_processed = X_processed[train_size:]
-        y_train_processed = y_processed[:train_size]
-        y_val_processed = y_processed[train_size:]
-        
-        # Convert to PyTorch tensors
-        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        X_train_tensor = torch.FloatTensor(X_train_processed).to(device)
-        X_val_tensor = torch.FloatTensor(X_val_processed).to(device)
-        y_train_tensor = torch.LongTensor(y_train_processed) if task_type == "classification" else torch.FloatTensor(y_train_processed)
-        y_val_tensor = torch.LongTensor(y_val_processed) if task_type == "classification" else torch.FloatTensor(y_val_processed)
-        y_train_tensor = y_train_tensor.to(device)
-        y_val_tensor = y_val_tensor.to(device)
-        
-        logger.info(f"🔥 PyTorch tensors prepared for {model_name}", 
-                   train_size=len(X_train_tensor),
-                   val_size=len(X_val_tensor),
-                   features=X_train_tensor.shape[1],
-                   device=str(device),
-                   target_unique_values=len(torch.unique(y_train_tensor)))
-        
-        # Map architecture names to PyTorch model types
-        arch_name = architecture['name']
-        if 'simple' in arch_name.lower():
-            pytorch_arch_type = "simple_mlp"
-        elif 'balanced' in arch_name.lower():
-            pytorch_arch_type = "resnet_mlp"
-        elif 'deep' in arch_name.lower():
-            pytorch_arch_type = "attention_mlp"
-        else:
-            pytorch_arch_type = "simple_mlp"  # Default
-        
-        logger.info(f"🏗️ Using PyTorch architecture: {pytorch_arch_type} for {model_name}")
-        
-        # Create PyTorch model config from sklearn config
-        config = {
-            "architecture_type": pytorch_arch_type,
-            "hidden_dims": [128, 64],  # Default good configuration
-            "activation": "relu",
-            "dropout": 0.1,
-            "learning_rate": 0.001,
-            "epochs": 100,
-            "optimizer": "adam",
-            "scheduler": "none"
-        }
-        
-        # Override with any custom config from architecture
-        if 'hidden_layer_sizes' in architecture['config']:
-            config["hidden_dims"] = list(architecture['config']['hidden_layer_sizes'])
-        if 'activation' in architecture['config']:
-            config["activation"] = architecture['config']['activation']
-        if 'alpha' in architecture['config']:  # sklearn alpha -> PyTorch dropout
-            config["dropout"] = min(0.5, max(0.0, architecture['config']['alpha'] * 100))
-        
-        logger.info(f"⚙️ PyTorch model configuration for {model_name}",
-                   config=config)
-        
-        # Send progress update
-        await self._send_training_status_update("neural_network_training", {
-            "message": f"Training PyTorch {pytorch_arch_type} neural network",
-            "model_name": model_name,
-            "architecture_type": pytorch_arch_type,
-            "config": config
-        })
-        
-        # Use PyTorch NAS to find best configuration
-        from .pytorch_nas import PyTorchNAS
-        nas_engine = PyTorchNAS(task_type, metric, max_time_minutes=5)  # Short search for each architecture
-        
         try:
-            logger.info(f"🔍 Starting Neural Architecture Search for {model_name}")
+            # Use the existing PyTorchTrainer instead of reimplementing
+            from .pytorch_trainer import PyTorchTrainer
             
-            nas_result = nas_engine.search_architecture(
-                X_train_tensor, y_train_tensor, X_val_tensor, y_val_tensor,
-                architecture_type=pytorch_arch_type,
-                search_strategy="fast"  # Quick search per architecture
+            # Create temporary dataset file from train/val data
+            import tempfile
+            import pandas as pd
+            from pathlib import Path
+            
+            # Combine train and validation data back into a single dataset
+            # The PyTorchTrainer will split it again, but this ensures consistent preprocessing
+            X_combined = pd.concat([X_train, X_val], axis=0, ignore_index=True)
+            y_combined = pd.concat([y_train, y_val], axis=0, ignore_index=True)
+            
+            combined_df = X_combined.copy()
+            combined_df[y_train.name or 'target'] = y_combined
+            
+            # Save temporary dataset
+            temp_dir = Path(settings.TEMP_DIR)
+            temp_dir.mkdir(parents=True, exist_ok=True)
+            temp_dataset_path = temp_dir / f"{self.run_id}_{model_name}_temp.csv"
+            combined_df.to_csv(temp_dataset_path, index=False)
+            
+            logger.info(f"🔄 Created temporary dataset for {model_name}: {temp_dataset_path}")
+            
+            # Create PyTorchTrainer instance with the same websocket manager
+            pytorch_trainer = PyTorchTrainer(self.run_id, self.session_id, self.websocket_manager)
+            
+            # Create a minimal data profile for the trainer
+            from ..models.schema import DataProfile
+            data_profile = DataProfile(
+                n_rows=len(combined_df),
+                n_cols=len(combined_df.columns) - 1,  # Exclude target column
+                columns={
+                    'categorical_cols': [],
+                    'numeric_cols': list(combined_df.select_dtypes(include=['number']).columns),
+                    'missing_values': {},
+                    'target_distribution': {}
+                },
+                issues=[]
             )
             
-            best_config = nas_result["best_config"]
-            val_score = nas_result["best_score"]
+            # Configure constraints for single architecture training
+            pytorch_constraints = constraints.copy()
+            pytorch_constraints.update({
+                "pytorch_search_strategy": "fast",  # Quick search for each architecture
+                "force_pytorch": True,  # Ensure PyTorch is enabled
+                "include_pytorch": True
+            })
             
-            logger.info(f"✅ PyTorch NAS completed for {model_name}", 
-                       val_score=f"{val_score:.4f}",
-                       best_config=best_config)
+            logger.info(f"🚀 Starting PyTorch training for {model_name}")
+            
+            # Send progress update
+            await self._send_training_status_update("neural_network_training", {
+                "message": f"Training PyTorch neural network: {model_name}",
+                "model_name": model_name,
+                "using_pytorch_trainer": True
+            })
+            
+            # Use the existing PyTorchTrainer to train models
+            pytorch_models = await pytorch_trainer.train_pytorch_models(
+                dataset_path=str(temp_dataset_path),
+                target_col=y_train.name or 'target',
+                task_type=task_type,
+                metric=metric,
+                constraints=pytorch_constraints,
+                data_profile=data_profile,
+                search_strategy="fast"
+            )
+            
+            # Clean up temporary file
+            try:
+                temp_dataset_path.unlink()
+            except:
+                pass
+            
+            if not pytorch_models:
+                raise ValueError(f"PyTorchTrainer returned no models for {model_name}")
+            
+            # Get the best model from the results
+            best_model = max(pytorch_models, key=lambda x: x.val_score if metric in ['accuracy', 'precision', 'recall', 'f1'] else -x.val_score)
+            
+            # Rename the model to match the architecture name
+            original_path = Path(best_model.model_path)
+            new_path = original_path.parent / f"{model_name}_pytorch.pth"
+            
+            # Copy the model file to the new name
+            import shutil
+            shutil.copy2(original_path, new_path)
+            
+            # Update the model artifact
+            result_model = ModelArtifact(
+                run_id=self.run_id,
+                family=model_name,
+                model_path=str(new_path),
+                val_score=best_model.val_score,
+                train_score=best_model.train_score
+            )
+            
+            await self._send_architecture_completion(model_name, best_model.val_score)
+            
+            logger.info(f"✅ PyTorch neural network {model_name} training completed", 
+                       val_score=f"{best_model.val_score:.4f}",
+                       train_score=f"{best_model.train_score:.4f}",
+                       model_path=str(new_path))
+            
+            return result_model
             
         except Exception as e:
-            logger.error(f"❌ PyTorch NAS failed for {model_name}, using default config", 
+            logger.error(f"❌ PyTorch neural network training failed for {model_name}", 
                         error=str(e),
                         error_type=type(e).__name__)
             
-            # Fall back to manual training with default config
-            from .pytorch_models import PyTorchModelFactory
+            # Fallback: create a dummy model with poor performance to avoid breaking the ensemble
+            await self._send_architecture_completion(model_name, 0.0)
             
-            input_dim = X_train_tensor.shape[1]
-            output_dim = len(torch.unique(y_train_tensor)) if task_type == "classification" else 1
+            # Create a minimal model artifact to prevent ensemble creation from failing
+            model_dir = Path(settings.MODELS_DIR) / self.run_id
+            model_dir.mkdir(parents=True, exist_ok=True)
+            fallback_path = model_dir / f"{model_name}_failed.pkl"
             
-            logger.info(f"🔧 Fallback training for {model_name}",
-                       input_dim=input_dim,
-                       output_dim=output_dim)
+            fallback_info = {
+                "model_type": "failed_pytorch",
+                "error": str(e),
+                "val_score": 0.0,
+                "train_score": 0.0
+            }
             
-            model = PyTorchModelFactory.create_model(
-                pytorch_arch_type, input_dim, output_dim, task_type, config
+            import pickle
+            with open(fallback_path, 'wb') as f:
+                pickle.dump(fallback_info, f)
+            
+            return ModelArtifact(
+                run_id=self.run_id,
+                family=model_name,
+                model_path=str(fallback_path),
+                val_score=0.0,
+                train_score=0.0
             )
-            model.to(device)
-            
-            # Quick training
-            optimizer = torch.optim.Adam(model.parameters(), lr=config["learning_rate"])
-            loss_fn = model.get_loss_function()
-            
-            model.train()
-            logger.info(f"🏃 Starting manual training for {model_name} (50 epochs)")
-            
-            for epoch in range(50):  # Quick training
-                optimizer.zero_grad()
-                outputs = model(X_train_tensor)
-                
-                if task_type == "classification":
-                    loss = loss_fn(outputs, y_train_tensor)
-                else:
-                    loss = loss_fn(outputs.squeeze(), y_train_tensor)
-                
-                loss.backward()
-                optimizer.step()
-                
-                # Log progress every 10 epochs
-                if epoch % 10 == 0:
-                    logger.debug(f"🏃 Epoch {epoch}/50 for {model_name}, Loss: {loss.item():.4f}")
-            
-            # Evaluate
-            model.eval()
-            with torch.no_grad():
-                val_outputs = model(X_val_tensor)
-                if task_type == "classification":
-                    val_pred = torch.argmax(val_outputs, dim=1)
-                    val_score = (val_pred == y_val_tensor).float().mean().item()
-                else:
-                    val_score = -torch.mean((val_outputs.squeeze() - y_val_tensor) ** 2).item()
-            
-            logger.info(f"✅ Manual training completed for {model_name}, Val Score: {val_score:.4f}")
-            best_config = config
-        
-        # Calculate train score for consistency
-        try:
-            # Quick evaluation on training data
-            from .pytorch_models import PyTorchModelFactory
-            
-            input_dim = X_train_tensor.shape[1]
-            output_dim = len(torch.unique(y_train_tensor)) if task_type == "classification" else 1
-            
-            model = PyTorchModelFactory.create_model(
-                pytorch_arch_type, input_dim, output_dim, task_type, best_config
-            )
-            model.to(device)
-            model.eval()
-            
-            with torch.no_grad():
-                train_outputs = model(X_train_tensor)
-                if task_type == "classification":
-                    train_pred = torch.argmax(train_outputs, dim=1)
-                    train_score = (train_pred == y_train_tensor).float().mean().item()
-                else:
-                    train_score = -torch.mean((train_outputs.squeeze() - y_train_tensor) ** 2).item()
-        except:
-            train_score = val_score  # Fallback
-        
-        # Save model (we'll save the config and let the ensemble loader handle PyTorch models)
-        model_dir = Path(settings.MODELS_DIR) / self.run_id
-        model_dir.mkdir(parents=True, exist_ok=True)
-        model_path = model_dir / f"{model_name}_pytorch.pkl"
-        
-        # Save PyTorch model info for ensemble
-        pytorch_model_info = {
-            "model_type": "pytorch_neural_network",
-            "architecture_type": pytorch_arch_type,
-            "config": best_config,
-            "preprocessing_info": {
-                "input_dim": X_train_tensor.shape[1],
-                "output_dim": len(torch.unique(y_train_tensor)) if task_type == "classification" else 1,
-                "device": str(device)
-            },
-            "task_type": task_type,
-            "val_score": val_score,
-            "train_score": train_score
-        }
-        
-        with open(model_path, 'wb') as f:
-            pickle.dump(pytorch_model_info, f)
-        
-        await self._send_architecture_completion(model_name, val_score)
-        
-        logger.info(f"🎉 PyTorch neural network {model_name} training completed successfully", 
-                   val_score=f"{val_score:.4f}",
-                   train_score=f"{train_score:.4f}",
-                   architecture_type=pytorch_arch_type,
-                   model_saved=str(model_path))
-        
-        return ModelArtifact(
-            run_id=self.run_id,
-            family=model_name,
-            model_path=str(model_path),
-            val_score=val_score,
-            train_score=train_score
-        )
     
     async def _create_ensemble(
         self,
@@ -904,12 +802,40 @@ class EnhancedTrainingOrchestrator:
                    method=ensemble_strategy.ensemble_method,
                    n_models=len(trained_models))
         
-        # Load trained models
+        # Load trained models, handling both sklearn and PyTorch models
         estimators = []
+        pytorch_models = []
+        
         for model_artifact in trained_models:
-            with open(model_artifact.model_path, 'rb') as f:
-                pipeline = pickle.load(f)
-            estimators.append((model_artifact.family, pipeline))
+            try:
+                # Check if this is a PyTorch model
+                if model_artifact.model_path.endswith('.pth') or 'pytorch' in model_artifact.family.lower():
+                    logger.info(f"Skipping PyTorch model {model_artifact.family} from sklearn ensemble")
+                    pytorch_models.append(model_artifact)
+                    continue
+                    
+                # Load sklearn models normally
+                with open(model_artifact.model_path, 'rb') as f:
+                    model_or_info = pickle.load(f)
+                
+                # Handle failed models
+                if isinstance(model_or_info, dict) and model_or_info.get("model_type") == "failed_pytorch":
+                    logger.warning(f"Skipping failed PyTorch model {model_artifact.family}")
+                    continue
+                
+                # Handle sklearn pipeline/model
+                estimators.append((model_artifact.family, model_or_info))
+                logger.info(f"Added sklearn model {model_artifact.family} to ensemble")
+                
+            except Exception as e:
+                logger.error(f"Failed to load model {model_artifact.family}", error=str(e))
+                continue
+        
+        if not estimators:
+            raise ValueError("No valid sklearn models available for ensemble creation")
+        
+        if pytorch_models:
+            logger.info(f"Note: {len(pytorch_models)} PyTorch models were trained but excluded from sklearn ensemble")
         
         # Create ensemble based on strategy
         if ensemble_strategy.ensemble_method == "voting":
