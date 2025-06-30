@@ -90,6 +90,49 @@ class AutoMLApp {
                 this.handleDeploymentComplete(data);
             });
             
+            // Handle enhanced training events
+            apiClient.addEventListener('ensemble_strategy', (data) => {
+                uiManager.handleEnsembleStrategy(data);
+            });
+            
+            apiClient.addEventListener('architecture_trial', (data) => {
+                uiManager.handleArchitectureTrial(data);
+            });
+            
+            apiClient.addEventListener('architecture_complete', (data) => {
+                uiManager.handleArchitectureComplete(data);
+            });
+            
+            // Handle training status updates
+            apiClient.addEventListener('training_status', (data) => {
+                this.handleTrainingStatus(data);
+            });
+            
+            // Handle detailed PyTorch training events
+            apiClient.addEventListener('training_start', (data) => {
+                this.handleTrainingStart(data);
+            });
+            
+            apiClient.addEventListener('epoch_update', (data) => {
+                this.handleEpochUpdate(data);
+            });
+            
+            apiClient.addEventListener('model_improvement', (data) => {
+                this.handleModelImprovement(data);
+            });
+            
+            apiClient.addEventListener('early_stopping', (data) => {
+                this.handleEarlyStopping(data);
+            });
+            
+            apiClient.addEventListener('pytorch_training_start', (data) => {
+                this.handlePyTorchTrainingStart(data);
+            });
+            
+            apiClient.addEventListener('pytorch_training_complete', (data) => {
+                this.handlePyTorchTrainingComplete(data);
+            });
+            
         } catch (error) {
             console.warn('WebSocket connection failed:', error);
             uiManager.showNotification('warning', 'Connection Warning', 'Real-time updates may not be available');
@@ -126,16 +169,22 @@ class AutoMLApp {
     handleTrainingComplete(data) {
         console.log('Training completed:', data);
         
-        // Update ALL family statuses to completed
-        const families = ['baseline', 'lightgbm', 'mlp'];
-        families.forEach(family => {
-            uiManager.updateFamilyProgress(family, {
-                status: 'completed'
+        // Check if this is enhanced training
+        if (data.enhanced_results) {
+            // Show enhanced training results
+            uiManager.showEnhancedTrainingResults(data);
+        } else {
+            // Update ALL family statuses to completed for standard training
+            const families = ['baseline', 'lightgbm', 'mlp'];
+            families.forEach(family => {
+                uiManager.updateFamilyProgress(family, {
+                    status: 'completed'
+                });
             });
-        });
-        
-        // Show training results
-        uiManager.showTrainingResults(data);
+            
+            // Show standard training results
+            uiManager.showTrainingResults(data);
+        }
         
         // Update overall progress to 100%
         this.setOverallProgress(100);
@@ -152,6 +201,17 @@ class AutoMLApp {
     handleDeploymentComplete(data) {
         console.log('Deployment completed:', data);
         uiManager.showDeploymentResults(data);
+    }
+
+    // Handle training status updates
+    handleTrainingStatus(data) {
+        console.log('Training status update:', data);
+        uiManager.addTrainingStatusLog(data);
+        
+        // Handle model completion for enhanced mode
+        if (data.data?.status === 'model_completed') {
+            uiManager.handleModelCompletion(data);
+        }
     }
 
     // Update overall progress based on family progress
@@ -296,6 +356,88 @@ class AutoMLApp {
             currentRunId: uiManager.currentRunId,
             websocketConnected: apiClient.websocket && apiClient.websocket.readyState === WebSocket.OPEN
         };
+    }
+
+    // Handle training start event
+    handleTrainingStart(data) {
+        console.log('Training start received:', data);
+        uiManager.addTrainingLog({
+            family: data.model,
+            trial: 0,
+            val_metric: null,
+            elapsed_s: 0,
+            message: data.message
+        });
+    }
+
+    // Handle epoch update event
+    handleEpochUpdate(data) {
+        console.log('Epoch update received:', data);
+        
+        // Add detailed epoch log
+        uiManager.addEpochLog(data);
+        
+        // Update model progress if applicable
+        if (data.model && data.progress) {
+            uiManager.updateModelProgress(data.model, {
+                progress: data.progress,
+                val_score: data.val_score,
+                epoch: data.epoch,
+                total_epochs: data.total_epochs
+            });
+        }
+    }
+
+    // Handle model improvement event
+    handleModelImprovement(data) {
+        console.log('Model improvement received:', data);
+        uiManager.addTrainingLog({
+            family: data.model,
+            trial: data.epoch,
+            val_metric: data.new_best_score,
+            elapsed_s: 0,
+            message: data.message,
+            type: 'improvement'
+        });
+    }
+
+    // Handle early stopping event
+    handleEarlyStopping(data) {
+        console.log('Early stopping received:', data);
+        uiManager.addTrainingLog({
+            family: data.model,
+            trial: data.stopped_at_epoch,
+            val_metric: null,
+            elapsed_s: 0,
+            message: data.message,
+            type: 'early_stop'
+        });
+    }
+
+    // Handle PyTorch training start
+    handlePyTorchTrainingStart(data) {
+        console.log('PyTorch training start received:', data);
+        uiManager.addTrainingLog({
+            family: 'pytorch',
+            trial: 0,
+            val_metric: null,
+            elapsed_s: 0,
+            message: data.message,
+            type: 'pytorch_start'
+        });
+    }
+
+    // Handle PyTorch training complete
+    handlePyTorchTrainingComplete(data) {
+        console.log('PyTorch training complete received:', data);
+        uiManager.addTrainingLog({
+            family: 'pytorch',
+            trial: data.models_trained || 0,
+            val_metric: data.best_validation_score,
+            elapsed_s: 0,
+            message: data.message,
+            type: 'pytorch_complete'
+        });
     }
 
     // Cleanup resources

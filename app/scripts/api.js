@@ -140,8 +140,17 @@ class APIClient {
             const response = await fetch(url, config);
 
             if (!response.ok) {
-                const errorData = await response.json().catch(() => ({}));
-                throw new Error(errorData.detail || `HTTP ${response.status}: ${response.statusText}`);
+                let errorMessage;
+                try {
+                    const errorData = await response.json();
+                    errorMessage = errorData.detail || errorData.message || errorData.error;
+                } catch (e) {
+                    errorMessage = `HTTP ${response.status}: ${response.statusText}`;
+                }
+                const error = new Error(errorMessage || `HTTP ${response.status}: ${response.statusText}`);
+                error.status = response.status;
+                error.statusText = response.statusText;
+                throw error;
             }
 
             const result = await response.json();
@@ -155,7 +164,7 @@ class APIClient {
     }
 
     // Start ML session with file upload and prompt
-    async startMLSession(file, prompt) {
+    async startMLSession(file, prompt, enhanced = false) {
         if (!this.sessionId) {
             throw new Error('Session not initialized');
         }
@@ -164,9 +173,10 @@ class APIClient {
         formData.append('file', file);
         formData.append('prompt', prompt);
 
+        const endpoint = enhanced ? 'start-enhanced' : 'start';
         return this.request(
             'POST',
-            `/session/${this.sessionId}/start`,
+            `/session/${this.sessionId}/${endpoint}`,
             formData,
             true
         );
@@ -236,6 +246,63 @@ class APIClient {
         }
         this.sessionId = null;
         this.listeners.clear();
+    }
+
+    // Get model recommendations from AI
+    async getModelRecommendations(file, prompt, enhanced = false) {
+        const formData = new FormData();
+        formData.append('file', file);
+        formData.append('prompt', prompt);
+        formData.append('enhanced', enhanced.toString());
+        formData.append('session_id', this.sessionId);
+
+        const response = await fetch(`${this.baseURL}/api/get-model-recommendations`, {
+            method: 'POST',
+            body: formData
+        });
+
+        if (!response.ok) {
+            let errorMessage;
+            try {
+                const errorData = await response.json();
+                errorMessage = errorData.detail || errorData.message || errorData.error;
+            } catch (e) {
+                errorMessage = `HTTP ${response.status}: ${response.statusText}`;
+            }
+            const error = new Error(errorMessage || `HTTP ${response.status}: ${response.statusText}`);
+            error.status = response.status;
+            error.statusText = response.statusText;
+            throw error;
+        }
+
+        return response.json();
+    }
+
+    // Start training with user-selected models
+    async startTrainingWithSelection(selectionData) {
+        const response = await fetch(`${this.baseURL}/api/start-training-with-selection`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(selectionData)
+        });
+
+        if (!response.ok) {
+            let errorMessage;
+            try {
+                const errorData = await response.json();
+                errorMessage = errorData.detail || errorData.message || errorData.error;
+            } catch (e) {
+                errorMessage = `HTTP ${response.status}: ${response.statusText}`;
+            }
+            const error = new Error(errorMessage || `HTTP ${response.status}: ${response.statusText}`);
+            error.status = response.status;
+            error.statusText = response.statusText;
+            throw error;
+        }
+
+        return response.json();
     }
 }
 

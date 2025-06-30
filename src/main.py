@@ -8,6 +8,7 @@ import logging
 import os
 from contextlib import asynccontextmanager
 from pathlib import Path
+from datetime import datetime
 
 import structlog
 import uvicorn
@@ -21,43 +22,54 @@ from .core.config import settings
 from .database import init_db
 
 
-# Configure structured logging
-structlog.configure(
-    processors=[
-        structlog.stdlib.filter_by_level,
-        structlog.stdlib.add_logger_name,
-        structlog.stdlib.add_log_level,
-        structlog.stdlib.PositionalArgumentsFormatter(),
-        structlog.processors.TimeStamper(fmt="iso"),
-        structlog.processors.StackInfoRenderer(),
-        structlog.processors.format_exc_info,
-        structlog.processors.UnicodeDecoder(),
-        structlog.processors.JSONRenderer()
-    ],
-    context_class=dict,
-    logger_factory=structlog.stdlib.LoggerFactory(),
-    wrapper_class=structlog.stdlib.BoundLogger,
-    cache_logger_on_first_use=True,
-)
+# Configure better logging for development
+def configure_logging():
+    """Configure structured logging with better readability"""
+    
+    # Set log levels to reduce noise
+    logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
+    logging.getLogger("sqlalchemy.engine").setLevel(logging.WARNING)
+    logging.getLogger("sqlalchemy.pool").setLevel(logging.WARNING)
+    
+    # Configure structlog with readable format
+    structlog.configure(
+        processors=[
+            structlog.stdlib.filter_by_level,
+            structlog.stdlib.add_logger_name,
+            structlog.stdlib.add_log_level,
+            structlog.stdlib.PositionalArgumentsFormatter(),
+            structlog.processors.TimeStamper(fmt="iso"),
+            structlog.processors.StackInfoRenderer(),
+            structlog.processors.format_exc_info,
+            structlog.dev.ConsoleRenderer(colors=True)  # Pretty colors for console
+        ],
+        wrapper_class=structlog.stdlib.BoundLogger,
+        logger_factory=structlog.stdlib.LoggerFactory(),
+        cache_logger_on_first_use=True,
+    )
 
 logger = structlog.get_logger()
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Application lifespan management"""
-    logger.info("Starting AutoML Desktop Backend")
+    """Application lifespan manager"""
+    # Configure logging first
+    configure_logging()
+    
+    logger.info("Starting AutoML Desktop")
+    
+    # Create necessary directories
+    settings.TEMP_DIR.mkdir(exist_ok=True)
+    settings.MODELS_DIR.mkdir(exist_ok=True)
+    settings.RUNS_DIR.mkdir(exist_ok=True)
     
     # Initialize database
     await init_db()
     
-    # Create temp directories
-    os.makedirs(settings.TEMP_DIR, exist_ok=True)
-    os.makedirs(settings.MODELS_DIR, exist_ok=True)
-    
     yield
     
-    logger.info("Shutting down AutoML Desktop Backend")
+    logger.info("Shutting down AutoML Desktop")
 
 
 # Create FastAPI app

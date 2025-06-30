@@ -7,8 +7,9 @@ import hashlib
 import json
 import os
 import uuid
+import traceback
 from datetime import datetime
-from typing import Dict, Any
+from typing import Dict, Any, List
 
 from fastapi import APIRouter, Depends, File, Form, UploadFile, HTTPException
 from sqlmodel import Session, select
@@ -16,20 +17,49 @@ import pandas as pd
 import structlog
 
 from ..core.config import settings
-from ..database import get_session
+from ..database import get_session, engine
 from ..models.schema import (
     Run, PromptRequest, PromptResponse, DataProfile,
-    ModelArtifact, DeploymentResult
+    ModelArtifact, DeploymentResult, EnhancedRun
 )
 from ..ml.prompt_parser import PromptParser
 from ..ml.data_profiler import DataProfiler
 from ..ml.trainer import TrainingOrchestrator
+from ..ml.enhanced_trainer import EnhancedTrainingOrchestrator
 from ..ml.explainer import Explainer
 from ..ml.deployer import Deployer
 from .websocket_manager import websocket_manager
 
 logger = structlog.get_logger()
 router = APIRouter()
+
+# Global storage for training tasks
+training_tasks = {}
+
+
+def generate_session_id() -> str:
+    """Generate a unique session ID"""
+    return f"session_{uuid.uuid4().hex[:10]}_{int(datetime.now().timestamp() * 1000)}"
+
+
+def generate_run_id() -> str:
+    """Generate a unique run ID"""
+    return str(uuid.uuid4())
+
+
+async def save_uploaded_file(file: UploadFile, run_id: str) -> str:
+    """Save uploaded file and return path"""
+    # Create temp directory if it doesn't exist
+    settings.TEMP_DIR.mkdir(parents=True, exist_ok=True)
+    
+    # Save file
+    file_path = settings.TEMP_DIR / f"{run_id}_{file.filename}"
+    
+    content = await file.read()
+    with open(file_path, 'wb') as f:
+        f.write(content)
+    
+    return str(file_path)
 
 
 @router.post("/session/{session_id}/start")
@@ -166,6 +196,146 @@ async def start_ml_session(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
+@router.post("/session/{session_id}/start-enhanced")
+async def start_enhanced_ml_session(
+    session_id: str,
+    file: UploadFile = File(...),
+    prompt: str = Form(...),
+    db: Session = Depends(get_session)
+):
+    """Start an enhanced ML session with LLM-guided ensemble model selection"""
+    
+    logger.info("Starting enhanced ML session", session_id=session_id, prompt=prompt)
+    
+    try:
+        # Validate file size
+        file_content = await file.read()
+        file_size_mb = len(file_content) / (1024 * 1024)
+        
+        if file_size_mb > settings.MAX_FILE_SIZE_MB:
+            raise HTTPException(
+                status_code=413,
+                detail=f"File too large. Max size: {settings.MAX_FILE_SIZE_MB}MB"
+            )
+        
+        # Create dataset hash for deduplication
+        dataset_hash = hashlib.sha1(file_content).hexdigest()
+        
+        # Load and validate dataset
+        try:
+            import io
+            df = pd.read_csv(io.BytesIO(file_content))
+        except Exception as e:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Failed to read CSV file: {str(e)}"
+            )
+        
+        if df.empty:
+            raise HTTPException(status_code=400, detail="Dataset is empty")
+        
+        # Create enhanced run record
+        run = EnhancedRun(
+            id=str(uuid.uuid4()),
+            user_prompt=prompt,
+            dataset_hash=dataset_hash,
+            status="parsing_prompt"
+        )
+        db.add(run)
+        db.commit()
+        db.refresh(run)
+        
+        # Parse prompt with GPT-4
+        prompt_parser = PromptParser()
+        dataset_preview = {
+            "columns": df.columns.tolist(),
+            "dtypes": df.dtypes.astype(str).to_dict(),
+            "sample_rows": df.head(5).to_dict(orient="records"),
+            "shape": df.shape
+        }
+        
+        prompt_request = PromptRequest(
+            session_id=session_id,
+            prompt=prompt,
+            dataset_preview=dataset_preview
+        )
+        
+        try:
+            prompt_response = await prompt_parser.parse_prompt(prompt_request)
+        except Exception as e:
+            run.status = "failed"
+            run.end_ts = datetime.utcnow()
+            db.commit()
+            await websocket_manager.broadcast_error(
+                session_id, f"Failed to parse prompt: {str(e)}"
+            )
+            raise HTTPException(status_code=400, detail=str(e))
+        
+        # Check if clarifications needed
+        if prompt_response.clarifications_needed:
+            run.status = "needs_clarification"
+            db.commit()
+            return {
+                "run_id": run.id,
+                "status": "needs_clarification",
+                "clarifications": prompt_response.clarifications_needed,
+                "parsed_intent": {
+                    "task": prompt_response.task,
+                    "target": prompt_response.target,
+                    "metric": prompt_response.metric,
+                    "constraints": prompt_response.constraints
+                }
+            }
+        
+        # Profile the data
+        run.status = "profiling_data"
+        db.commit()
+        
+        profiler = DataProfiler()
+        profile = profiler.profile_dataset(df)
+        
+        # Start enhanced training asynchronously
+        run.status = "selecting_models"
+        run.metric = prompt_response.metric
+        db.commit()
+        
+        # Save dataset temporarily for training
+        temp_file = settings.TEMP_DIR / f"{run.id}_dataset.csv"
+        df.to_csv(temp_file, index=False)
+        
+        # Schedule enhanced training in background
+        asyncio.create_task(
+            _run_enhanced_training_pipeline(
+                run.id, session_id, str(temp_file), 
+                prompt_response, profile, db
+            )
+        )
+        
+        return {
+            "run_id": run.id,
+            "status": "enhanced_training_started",
+            "data_profile": profile.dict(),
+            "parsed_intent": {
+                "task": prompt_response.task,
+                "target": prompt_response.target,
+                "metric": prompt_response.metric,
+                "constraints": prompt_response.constraints
+            },
+            "enhanced_features": [
+                "LLM-guided model selection",
+                "Multiple architecture testing per model",
+                "Neural architecture search",
+                "Intelligent ensemble creation"
+            ]
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Failed to start enhanced ML session", error=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
 @router.post("/session/{session_id}/clarify")
 async def provide_clarification(
     session_id: str,
@@ -266,13 +436,20 @@ async def _run_training_pipeline(
 ):
     """Run the complete training pipeline asynchronously"""
     
+    # Import here to avoid circular imports
+    from ..database import get_session
+    
     try:
+        logger.info("Starting training pipeline", run_id=run_id, session_id=session_id)
+        
         # Initialize training orchestrator
         trainer = TrainingOrchestrator(
             run_id=run_id,
             session_id=session_id,
             websocket_manager=websocket_manager
         )
+        
+        logger.info("Training orchestrator initialized", run_id=run_id)
         
         # Run training
         best_model = await trainer.train_models(
@@ -291,13 +468,16 @@ async def _run_training_pipeline(
             target_col=prompt_response.target
         )
         
-        # Update run status
-        run = db.get(Run, run_id)
-        run.status = "completed"
-        run.end_ts = datetime.utcnow()
-        run.best_family = best_model.family
-        run.val_score = best_model.val_score
-        db.commit()
+        # Update run status with fresh database session
+        with Session(engine) as fresh_db:
+            run = fresh_db.get(Run, run_id)
+            if run:
+                run.status = "completed"
+                run.end_ts = datetime.utcnow()
+                run.best_family = best_model.family
+                run.val_score = best_model.val_score
+                fresh_db.add(run)
+                fresh_db.commit()
         
         # Notify frontend
         await websocket_manager.broadcast_training_complete(
@@ -318,13 +498,444 @@ async def _run_training_pipeline(
     except Exception as e:
         logger.error("Training pipeline failed", run_id=run_id, error=str(e))
         
-        # Update run status
-        run = db.get(Run, run_id)
-        run.status = "failed"
-        run.end_ts = datetime.utcnow()
-        db.commit()
+        # Update run status with fresh database session
+        try:
+            with Session(engine) as fresh_db:
+                run = fresh_db.get(Run, run_id)
+                if run:
+                    run.status = "failed"
+                    run.end_ts = datetime.utcnow()
+                    fresh_db.add(run)
+                    fresh_db.commit()
+        except Exception as db_error:
+            logger.error("Failed to update run status", error=str(db_error))
         
         # Notify frontend
         await websocket_manager.broadcast_error(
             session_id, f"Training failed: {str(e)}"
-        ) 
+        )
+
+
+async def _run_enhanced_training_pipeline(
+    run_id: str,
+    session_id: str,
+    dataset_path: str,
+    prompt_response: PromptResponse,
+    profile: DataProfile,
+    db: Session
+):
+    """Run the enhanced training pipeline with LLM-guided model selection"""
+    
+    try:
+        # Initialize enhanced training orchestrator
+        trainer = EnhancedTrainingOrchestrator(
+            run_id=run_id,
+            session_id=session_id,
+            websocket_manager=websocket_manager
+        )
+        
+        # Run enhanced ensemble training
+        best_ensemble = await trainer.train_ensemble_models(
+            dataset_path=dataset_path,
+            target_col=prompt_response.target,
+            task_type=prompt_response.task,
+            metric=prompt_response.metric,
+            constraints=prompt_response.constraints,
+            data_profile=profile
+        )
+        
+        # Generate explanations for ensemble
+        explainer = Explainer()
+        explanation_result = await explainer.explain_model(
+            model_path=best_ensemble.model_path,
+            dataset_path=dataset_path,
+            target_col=prompt_response.target
+        )
+        
+        # Update run status with fresh database session
+        with Session(engine) as fresh_db:
+            run = fresh_db.get(EnhancedRun, run_id)
+            if run:
+                run.status = "completed"
+                run.end_ts = datetime.utcnow()
+                run.best_family = best_ensemble.family
+                run.val_score = best_ensemble.val_score
+                fresh_db.add(run)
+                fresh_db.commit()
+        
+        # Notify frontend
+        await websocket_manager.broadcast_training_complete(
+            session_id,
+            {
+                "run_id": run_id,
+                "best_ensemble": best_ensemble.dict(),
+                "explanation": explanation_result,
+                "enhanced_results": {
+                    "ensemble_method": best_ensemble.family,
+                    "models_tested": "Multiple architectures per model type",
+                    "selection_method": "LLM-guided with neural architecture search"
+                }
+            }
+        )
+        
+        # Cleanup temp files
+        try:
+            os.remove(dataset_path)
+        except:
+            pass
+            
+    except Exception as e:
+        logger.error("Enhanced training pipeline failed", run_id=run_id, error=str(e))
+        
+        # Update run status with fresh database session
+        try:
+            with Session(engine) as fresh_db:
+                run = fresh_db.get(EnhancedRun, run_id)
+                if run:
+                    run.status = "failed"
+                    run.end_ts = datetime.utcnow()
+                    fresh_db.add(run)
+                    fresh_db.commit()
+        except Exception as db_error:
+            logger.error("Failed to update run status", error=str(db_error))
+        
+        # Notify frontend
+        await websocket_manager.broadcast_error(
+            session_id, f"Enhanced training failed: {str(e)}"
+        )
+
+
+@router.post("/api/get-model-recommendations")
+async def get_model_recommendations(
+    file: UploadFile = File(...),
+    prompt: str = Form(...),
+    enhanced: str = Form(...),
+    session_id: str = Form(None),
+    db: Session = Depends(get_session)
+):
+    """Get AI model recommendations for user selection"""
+    try:
+        logger.info("Getting model recommendations for user selection", 
+                   file_name=file.filename,
+                   enhanced=enhanced)
+        
+        # Use provided session_id or generate new one
+        if not session_id:
+            session_id = generate_session_id()
+        run_id = generate_run_id()
+        
+        # Read file content for hashing and processing
+        file_content = await file.read()
+        
+        # Save file content directly (since file stream is consumed)
+        settings.TEMP_DIR.mkdir(parents=True, exist_ok=True)
+        file_path = settings.TEMP_DIR / f"{run_id}_{file.filename}"
+        with open(file_path, 'wb') as f:
+            f.write(file_content)
+        
+        # Load and profile data
+        df = pd.read_csv(file_path)
+        profiler = DataProfiler()
+        data_profile = profiler.profile_dataset(df)
+        
+        # Parse intent to get basic task info
+        parser = PromptParser()
+        
+        # Create dataset preview
+        dataset_preview = {
+            "columns": df.columns.tolist(),
+            "dtypes": df.dtypes.astype(str).to_dict(),
+            "sample_rows": df.head(5).to_dict(orient="records"),
+            "shape": df.shape
+        }
+        
+        prompt_request = PromptRequest(
+            session_id=session_id,
+            prompt=prompt,
+            dataset_preview=dataset_preview
+        )
+        
+        parsed_intent = await parser.parse_prompt(prompt_request)
+        
+        if parsed_intent.clarifications_needed:
+            return {
+                "status": "needs_clarification",
+                "run_id": run_id,
+                "clarifications": parsed_intent.clarifications_needed
+            }
+        
+        # Get LLM model recommendations
+        if enhanced.lower() == 'true':
+            from ..ml.model_selector import ModelSelector
+            model_selector = ModelSelector()
+            
+            ensemble_strategy = await model_selector.recommend_ensemble(
+                data_profile=data_profile,
+                task_type=parsed_intent.task,
+                target_column=parsed_intent.target,
+                constraints=parsed_intent.constraints
+            )
+            
+            # Format recommendations for frontend
+            recommendations = []
+            for model_rec in ensemble_strategy.recommended_models:
+                recommendations.append({
+                    "id": f"{model_rec.model_type}_{len(recommendations)}",
+                    "model_type": model_rec.model_type,
+                    "model_family": model_rec.model_family,
+                    "name": model_rec.model_type.replace("_", " ").title(),
+                    "complexity_score": model_rec.complexity_score,
+                    "expected_training_time": model_rec.expected_training_time,
+                    "training_time_estimate": model_rec.training_time_estimate,
+                    "memory_usage": model_rec.memory_usage,
+                    "interpretability": model_rec.interpretability,
+                    "reasoning": model_rec.reasoning,
+                    "pros": model_rec.pros or [],
+                    "cons": model_rec.cons or [],
+                    "best_for": model_rec.best_for,
+                    "architectures": len(model_rec.architectures),
+                    "selected": True  # Default to selected
+                })
+            
+            return {
+                "status": "recommendations_ready",
+                "run_id": run_id,
+                "session_id": session_id,
+                "parsed_intent": {
+                    "task": parsed_intent.task,
+                    "target": parsed_intent.target,
+                    "metric": parsed_intent.metric
+                },
+                "data_profile": {
+                    "n_rows": data_profile.n_rows,
+                    "n_cols": data_profile.n_cols,
+                    "issues": data_profile.issues
+                },
+                "recommendations": recommendations,
+                "ensemble_strategy": {
+                    "method": ensemble_strategy.ensemble_method,
+                    "reasoning": ensemble_strategy.reasoning,
+                    "diversity_score": ensemble_strategy.diversity_score
+                },
+                "estimated_total_time": "15-45 minutes",
+                "file_path": str(file_path)
+            }
+        else:
+            # For non-enhanced mode, start training directly
+            # Create run record
+            run = Run(
+                id=run_id,
+                user_prompt=prompt,
+                dataset_hash=hashlib.sha1(file_content).hexdigest(),
+                status="training",
+                metric=parsed_intent.metric
+            )
+            db.add(run)
+            db.commit()
+            db.refresh(run)
+            
+            # Start simple training in background
+            logger.info("Starting simple training pipeline", run_id=run_id, session_id=session_id)
+            asyncio.create_task(
+                _run_training_pipeline(
+                    run_id, session_id, file_path,
+                    PromptResponse(
+                        task=parsed_intent.task,
+                        target=parsed_intent.target,
+                        metric=parsed_intent.metric,
+                        constraints=parsed_intent.constraints or {},
+                        clarifications_needed=None
+                    ),
+                    data_profile, db
+                )
+            )
+            
+            return {
+                "status": "training_started",
+                "run_id": run_id,
+                "session_id": session_id,
+                "parsed_intent": {
+                    "task": parsed_intent.task,
+                    "target": parsed_intent.target,
+                    "metric": parsed_intent.metric
+                },
+                "data_profile": {
+                    "n_rows": data_profile.n_rows,
+                    "n_cols": data_profile.n_cols,
+                    "issues": data_profile.issues
+                }
+            }
+            
+    except Exception as e:
+        logger.error("Model recommendations failed", error=str(e))
+        raise HTTPException(status_code=500, detail=f"Model recommendations failed: {str(e)}")
+
+
+@router.post("/api/start-training-with-selection")
+async def start_training_with_selection(request: dict):
+    """Start training with user-selected models"""
+    try:
+        run_id = request["run_id"]
+        session_id = request["session_id"]
+        selected_models = request["selected_models"]  # List of selected model IDs
+        file_path = request["file_path"]
+        parsed_intent = request["parsed_intent"]
+        
+        logger.info("Starting training with user model selection", 
+                   run_id=run_id,
+                   selected_models=len(selected_models))
+        
+        # Load data
+        df = pd.read_csv(file_path)
+        profiler = DataProfiler()
+        data_profile = profiler.profile_dataset(df)
+        
+        # Start enhanced training in background with selected models
+        websocket_manager_instance = websocket_manager
+        
+        # Initialize constraints
+        constraints = {}
+        
+        task = asyncio.create_task(
+            _run_enhanced_training_with_selection(
+                run_id, session_id, file_path, parsed_intent["target"],
+                parsed_intent["task"], parsed_intent["metric"], 
+                constraints, data_profile, selected_models, websocket_manager_instance
+            )
+        )
+        
+        # Store task for potential cancellation
+        training_tasks[run_id] = task
+        
+        return {
+            "status": "training_started",
+            "run_id": run_id,
+            "message": f"Training started with {len(selected_models)} selected models"
+        }
+        
+    except Exception as e:
+        logger.error("Training with selection failed", error=str(e), traceback=traceback.format_exc())
+        raise HTTPException(status_code=500, detail=f"Training failed: {str(e)}")
+
+
+async def _run_enhanced_training_with_selection(
+    run_id: str,
+    session_id: str, 
+    dataset_path: str,
+    target_col: str,
+    task_type: str,
+    metric: str,
+    constraints: Dict[str, Any],
+    data_profile: DataProfile,
+    selected_models: List[str],
+    websocket_manager_instance
+):
+    """Run enhanced training with user-selected models"""
+    try:
+        logger.info("🚀 Starting enhanced training with selection", 
+                   run_id=run_id, 
+                   session_id=session_id,
+                   selected_models=selected_models,
+                   target_col=target_col,
+                   task_type=task_type,
+                   metric=metric,
+                   data_profile_rows=data_profile.n_rows,
+                   data_profile_cols=data_profile.n_cols)
+        
+        # Use enhanced trainer with proper model selection
+        from ..ml.enhanced_trainer import EnhancedTrainingOrchestrator
+        trainer = EnhancedTrainingOrchestrator(run_id, session_id, websocket_manager_instance)
+        
+        # Convert frontend model IDs to backend model types
+        model_type_mapping = {
+            "linear_regression": "linear_regression",
+            "logistic_regression": "logistic_regression", 
+            "random_forest": "random_forest",
+            "xgboost": "xgboost",
+            "lightgbm": "lightgbm",
+            "neural_network": "neural_network",
+            "svm": "svm",
+            "naive_bayes": "naive_bayes",
+            "knn": "knn"
+        }
+        
+        # Extract model types from selected model IDs
+        selected_model_types = []
+        for model_id in selected_models:
+            # Extract base model type from ID (remove suffixes like "_0", "_1", etc.)
+            base_type = model_id.split('_')[0] + '_' + model_id.split('_')[1] if '_' in model_id else model_id
+            if base_type in model_type_mapping:
+                selected_model_types.append(model_type_mapping[base_type])
+            else:
+                # Try to match partial names
+                for frontend_name, backend_name in model_type_mapping.items():
+                    if frontend_name in model_id.lower():
+                        selected_model_types.append(backend_name)
+                        break
+        
+        logger.info("🔍 Mapped selected models", 
+                   frontend_ids=selected_models, 
+                   backend_types=selected_model_types,
+                   neural_networks_selected=any("neural_network" in t for t in selected_model_types))
+        
+        # Add selected models to constraints
+        enhanced_constraints = constraints.copy()
+        enhanced_constraints["selected_models"] = selected_model_types
+        
+        logger.info("🎯 Starting enhanced trainer with constraints", 
+                   constraints=enhanced_constraints)
+        
+        # Send initial progress update
+        await websocket_manager_instance.broadcast_training_status(session_id, {
+            "event": "training_started",
+            "message": f"Starting enhanced training with {len(selected_model_types)} model types",
+            "selected_models": selected_model_types,
+            "progress": 0
+        })
+        
+        result = await trainer.train_ensemble_models(
+            dataset_path=dataset_path,
+            target_col=target_col,
+            task_type=task_type,
+            metric=metric,
+            constraints=enhanced_constraints,
+            data_profile=data_profile
+        )
+        
+        logger.info("✅ Enhanced training completed successfully with user selection", 
+                   run_id=run_id,
+                   final_score=f"{result.val_score:.4f}",
+                   best_model_family=result.family,
+                   train_score=f"{result.train_score:.4f}")
+        
+        # Send completion notification
+        await websocket_manager_instance.broadcast_training_complete(session_id, {
+            "enhanced_results": True,  # Mark as enhanced since we used enhanced trainer
+            "run_id": run_id,
+            "best_model": {
+                "family": result.family,
+                "val_score": result.val_score,
+                "train_score": result.train_score
+            },
+            "model_path": result.model_path,
+            "selected_models": selected_model_types,
+            "ensemble_method": "user_selected"
+        })
+        
+        logger.info("🎉 Training completion notification sent", 
+                   session_id=session_id, 
+                   run_id=run_id)
+        
+    except Exception as e:
+        logger.error("❌ Enhanced training with selection failed", 
+                    run_id=run_id, 
+                    session_id=session_id,
+                    error=str(e), 
+                    error_type=type(e).__name__,
+                    traceback=traceback.format_exc())
+        await websocket_manager_instance.broadcast_error(session_id, f"Enhanced training failed: {str(e)}")
+    finally:
+        # Clean up
+        if run_id in training_tasks:
+            del training_tasks[run_id]
+            logger.info("🧹 Cleaned up training task", run_id=run_id) 

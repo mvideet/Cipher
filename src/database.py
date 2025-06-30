@@ -13,7 +13,7 @@ logger = structlog.get_logger()
 # Create engine
 engine = create_engine(
     settings.DATABASE_URL,
-    echo=settings.DEBUG,
+    echo=settings.SQLALCHEMY_ECHO,  # Use dedicated setting for SQL logging
     connect_args={"check_same_thread": False}  # For SQLite
 )
 

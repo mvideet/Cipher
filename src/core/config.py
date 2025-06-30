@@ -16,6 +16,7 @@ class Settings(BaseSettings):
     API_HOST: str = "127.0.0.1"
     API_PORT: int = 8001
     DEBUG: bool = True
+    SQLALCHEMY_ECHO: bool = False  # Set to False to reduce database logs
     
     # OpenAI Configuration
     OPENAI_API_KEY: Optional[str] = None
@@ -34,6 +35,11 @@ class Settings(BaseSettings):
     MAX_TRAINING_TIME_MINUTES: int = 15
     MAX_OPTUNA_TRIALS: int = 20
     TRAINING_PROCESSES: int = 3
+    
+    # PyTorch Configuration
+    PYTORCH_ENABLED: bool = True
+    PYTORCH_SEARCH_STRATEGY: str = "progressive"  # progressive, optuna, random
+    PYTORCH_MAX_TIME_MINUTES: int = 8  # Time allocated to PyTorch training
     
     # File Upload Limits
     MAX_FILE_SIZE_MB: int = 100

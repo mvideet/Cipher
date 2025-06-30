@@ -3,7 +3,8 @@ GPT-4 based prompt parser for extracting ML task specifications
 """
 
 import json
-from typing import Dict, Any, Optional
+import re
+from typing import Dict, Any, Optional, List
 
 import openai
 from pydantic import BaseModel, ValidationError
@@ -65,6 +66,13 @@ class PromptParser:
             # Validate with Pydantic
             validated_spec = MLTaskSpec(**task_spec)
             
+            # ENHANCED: Add fuzzy column matching
+            if request.dataset_preview and request.dataset_preview.get("columns"):
+                validated_spec.target = self._find_best_column_match(
+                    validated_spec.target, 
+                    request.dataset_preview["columns"]
+                )
+            
             # Check for clarifications needed
             clarifications = self._check_clarifications_needed(
                 validated_spec, request.dataset_preview
@@ -111,6 +119,9 @@ RULES:
 5. exclude_cols should include obviously non-predictive columns (IDs, names, etc.)
 6. feature_limit should be set if user specifies a max number of features
 
+COLUMN MATCHING: If user says "predict complex target", look for "complex_target" column.
+If user says "predict house price", look for "house_price" or "price" column.
+
 NO additional text or explanation - JSON only."""
 
     def _get_few_shot_examples(self) -> list:
@@ -131,6 +142,23 @@ User request: Predict churn. Optimize recall. Max 5 features. Exclude CustomerID
                         "feature_limit": 5,
                         "exclude_cols": ["CustomerID"],
                         "class_weight": "balanced"
+                    }
+                })
+            },
+            {
+                "role": "user",
+                "content": """Dataset: complex_neural_dataset.csv (29 columns including sensor_reading_1, complex_target, experiment_type)
+User request: Predict complex target. Focus on accuracy."""
+            },
+            {
+                "role": "assistant",
+                "content": json.dumps({
+                    "task": "classification",
+                    "target": "complex_target",
+                    "metric": "accuracy",
+                    "constraints": {
+                        "feature_limit": None,
+                        "exclude_cols": []
                     }
                 })
             },
@@ -186,6 +214,84 @@ User request: {request.prompt}"""
             logger.error("Failed to decode JSON", response=response_text, error=str(e))
             raise ValueError(f"Invalid JSON in response: {str(e)}")
     
+    def _find_best_column_match(self, target_name: str, available_columns: List[str]) -> str:
+        """Enhanced column matching with fuzzy logic"""
+        
+        if not available_columns:
+            return target_name
+        
+        # Exact match (case-insensitive)
+        for col in available_columns:
+            if col.lower() == target_name.lower():
+                return col
+        
+        # Normalize target name for matching
+        normalized_target = self._normalize_column_name(target_name)
+        
+        # Try normalized matches
+        for col in available_columns:
+            normalized_col = self._normalize_column_name(col)
+            if normalized_col == normalized_target:
+                return col
+        
+        # Fuzzy matching for similar names
+        best_match = None
+        best_score = 0
+        
+        for col in available_columns:
+            score = self._calculate_similarity(target_name, col)
+            if score > best_score and score > 0.7:  # 70% similarity threshold
+                best_score = score
+                best_match = col
+        
+        if best_match:
+            logger.info(f"Fuzzy matched '{target_name}' to '{best_match}' (score: {best_score:.2f})")
+            return best_match
+        
+        # If no good match found, return original
+        logger.warning(f"No good column match found for '{target_name}'")
+        return target_name
+    
+    def _normalize_column_name(self, name: str) -> str:
+        """Normalize column name for matching"""
+        # Convert to lowercase
+        normalized = name.lower()
+        
+        # Replace spaces and special chars with underscores
+        normalized = re.sub(r'[^a-z0-9_]', '_', normalized)
+        
+        # Remove multiple underscores
+        normalized = re.sub(r'_+', '_', normalized)
+        
+        # Remove leading/trailing underscores
+        normalized = normalized.strip('_')
+        
+        return normalized
+    
+    def _calculate_similarity(self, name1: str, name2: str) -> float:
+        """Calculate similarity between two column names"""
+        # Simple similarity based on common substrings
+        name1_norm = self._normalize_column_name(name1)
+        name2_norm = self._normalize_column_name(name2)
+        
+        if name1_norm == name2_norm:
+            return 1.0
+        
+        # Check if one contains the other
+        if name1_norm in name2_norm or name2_norm in name1_norm:
+            return 0.9
+        
+        # Check for word overlap
+        words1 = set(name1_norm.split('_'))
+        words2 = set(name2_norm.split('_'))
+        
+        if words1 and words2:
+            overlap = len(words1.intersection(words2))
+            total = len(words1.union(words2))
+            return overlap / total if total > 0 else 0.0
+        
+        return 0.0
+    
     def _check_clarifications_needed(
         self, 
         spec: MLTaskSpec, 
@@ -198,7 +304,7 @@ User request: {request.prompt}"""
         
         columns = dataset_preview.get("columns", [])
         
-        # Check if target column exists
+        # Check if target column exists (after fuzzy matching)
         if spec.target not in columns:
             available = ", ".join(columns[:10])
             return f"Target column '{spec.target}' not found. Available columns: {available}..."

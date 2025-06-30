@@ -225,10 +225,35 @@ function handleError(error, context = '') {
     
     let message = 'An unexpected error occurred';
     
-    if (error.message) {
-        message = error.message;
+    if (error && typeof error === 'object') {
+        // Handle Response objects from fetch
+        if (error.status && error.statusText) {
+            message = `HTTP ${error.status}: ${error.statusText}`;
+        }
+        // Handle error objects with detail property (FastAPI format)
+        else if (error.detail) {
+            message = error.detail;
+        }
+        // Handle error objects with message property
+        else if (error.message) {
+            message = error.message;
+        }
+        // Handle error objects with error property
+        else if (error.error) {
+            message = error.error;
+        }
+        // Handle objects by converting to string
+        else {
+            try {
+                message = JSON.stringify(error);
+            } catch (e) {
+                message = String(error);
+            }
+        }
     } else if (typeof error === 'string') {
         message = error;
+    } else if (error) {
+        message = String(error);
     }
     
     if (context) {

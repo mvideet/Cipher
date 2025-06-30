@@ -72,6 +72,58 @@ class ConnectionManager:
         }
         await self.send_personal_message(message, session_id)
 
+    async def broadcast_training_status(self, session_id: str, status_data: dict):
+        """Broadcast training status update to session"""
+        message = {
+            "type": "training_status",
+            "data": status_data
+        }
+        await self.send_personal_message(message, session_id)
+
+    async def broadcast_to_session(self, session_id: str, event_data: dict):
+        """Broadcast generic event data to session"""
+        await self.send_personal_message(event_data, session_id)
+    
+    async def broadcast_pytorch_training_start(self, session_id: str, pytorch_data: dict):
+        """Broadcast PyTorch training start to session"""
+        message = {
+            "type": "pytorch_training_start", 
+            "data": pytorch_data
+        }
+        await self.send_personal_message(message, session_id)
+    
+    async def broadcast_pytorch_training_complete(self, session_id: str, pytorch_data: dict):
+        """Broadcast PyTorch training completion to session"""
+        message = {
+            "type": "pytorch_training_complete",
+            "data": pytorch_data
+        }
+        await self.send_personal_message(message, session_id)
+    
+    async def broadcast_epoch_update(self, session_id: str, epoch_data: dict):
+        """Broadcast epoch training update to session"""
+        message = {
+            "type": "epoch_update",
+            "data": epoch_data
+        }
+        await self.send_personal_message(message, session_id)
+    
+    async def broadcast_model_improvement(self, session_id: str, improvement_data: dict):
+        """Broadcast model improvement notification to session"""
+        message = {
+            "type": "model_improvement",
+            "data": improvement_data
+        }
+        await self.send_personal_message(message, session_id)
+    
+    async def broadcast_early_stopping(self, session_id: str, stopping_data: dict):
+        """Broadcast early stopping notification to session"""
+        message = {
+            "type": "early_stopping",
+            "data": stopping_data
+        }
+        await self.send_personal_message(message, session_id)
+
 
 # Global connection manager instance
 websocket_manager = ConnectionManager() 

@@ -12,6 +12,7 @@ import matplotlib.pyplot as plt
 import shap
 import structlog
 import openai
+from sklearn.pipeline import Pipeline
 
 from ..core.config import settings
 
@@ -51,11 +52,41 @@ class Explainer:
             X = X.iloc[sample_idx]
             y = y.iloc[sample_idx]
         
-        # Get model from pipeline
-        model = pipeline.named_steps['model']
+        # Get model from pipeline or use direct model
+        if isinstance(pipeline, Pipeline):
+            # This is a proper sklearn Pipeline
+            model = pipeline.named_steps['model']
+            X_processed = pipeline[:-1].transform(X)  # All steps except final model
+        else:
+            # This is a direct model (like ensemble) without pipeline wrapper
+            model = pipeline
+            X_processed = X  # Use raw features for ensemble models
         
-        # Transform features using preprocessing
-        X_processed = pipeline[:-1].transform(X)  # All steps except final model
+        # For ensemble models, we can't easily explain individual components
+        # so we'll use a kernel explainer
+        if hasattr(model, 'estimators_') or 'Voting' in type(model).__name__ or 'Stacking' in type(model).__name__:
+            logger.info("Detected ensemble model, using simplified explanation")
+            # For ensembles, we'll just do basic feature importance
+            if hasattr(model, 'feature_importances_'):
+                # Some ensembles have feature importance
+                feature_names = X.columns.tolist()
+                feature_importance = dict(zip(feature_names, model.feature_importances_))
+                sorted_importance = dict(sorted(feature_importance.items(), key=lambda x: x[1], reverse=True))
+                return {
+                    "feature_importance": sorted_importance,
+                    "plot_path": None,
+                    "text_explanation": f"This ensemble model uses multiple algorithms. The most important features are: {', '.join(list(sorted_importance.keys())[:5])}.",
+                    "n_samples_explained": len(X)
+                }
+            else:
+                # Fallback for ensembles without feature importance
+                feature_names = X.columns.tolist()
+                return {
+                    "feature_importance": {name: 1.0/len(feature_names) for name in feature_names},
+                    "plot_path": None,
+                    "text_explanation": "This ensemble model combines multiple algorithms. Feature importance analysis is not available for this ensemble type.",
+                    "n_samples_explained": len(X)
+                }
         
         # Choose SHAP explainer based on model type
         explainer = self._get_explainer(model, X_processed)
@@ -118,22 +149,23 @@ class Explainer:
         """Get feature names after preprocessing"""
         
         try:
-            # Try to get feature names from the preprocessor
-            preprocessor = pipeline.named_steps.get('preprocessor') or pipeline.named_steps.get('transform')
-            
-            if hasattr(preprocessor, 'get_feature_names_out'):
-                return preprocessor.get_feature_names_out().tolist()
-            elif hasattr(preprocessor, 'get_feature_names'):
-                return preprocessor.get_feature_names().tolist()
+            # Check if this is a pipeline with preprocessing steps
+            if isinstance(pipeline, Pipeline):
+                # Try to get feature names from the preprocessor
+                preprocessor = pipeline.named_steps.get('preprocessor') or pipeline.named_steps.get('transform')
+                
+                if preprocessor and hasattr(preprocessor, 'get_feature_names_out'):
+                    return preprocessor.get_feature_names_out().tolist()
+                elif preprocessor and hasattr(preprocessor, 'get_feature_names'):
+                    return preprocessor.get_feature_names().tolist()
             
             # Fallback: use original column names
             return X_original.columns.tolist()
             
         except Exception as e:
             logger.warning("Could not extract feature names", error=str(e))
-            # Generate generic names
-            n_features = pipeline[:-1].transform(X_original.head(1)).shape[1]
-            return [f"feature_{i}" for i in range(n_features)]
+            # Generate generic names based on original data shape
+            return X_original.columns.tolist() if hasattr(X_original, 'columns') else [f"feature_{i}" for i in range(X_original.shape[1])]
     
     def _calculate_feature_importance(self, shap_values, feature_names):
         """Calculate feature importance from SHAP values"""
