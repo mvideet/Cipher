@@ -9,6 +9,12 @@ class APIClient {
         this.listeners = new Map();
         this.reconnectAttempts = 0;
         this.isReconnecting = false;
+        this.connectionEstablished = false;
+        this.statusMonitorInterval = null;
+        this.keepAliveInterval = null;
+        
+        // Start connection status monitoring
+        this.startConnectionMonitoring();
     }
 
     // Initialize session
@@ -20,51 +26,92 @@ class APIClient {
     // Connect WebSocket for real-time updates
     connectWebSocket() {
         if (this.websocket && this.websocket.readyState === WebSocket.OPEN) {
+            console.log('🔗 WebSocket already connected, reusing connection');
             return Promise.resolve();
+        }
+        
+        // Close any existing connection first
+        if (this.websocket && this.websocket.readyState !== WebSocket.CLOSED) {
+            console.log('🔄 Closing existing WebSocket before new connection');
+            try {
+                this.websocket.close();
+            } catch (error) {
+                console.error('❌ Error closing existing WebSocket:', error);
+            }
+            this.websocket = null;
         }
         
         // Prevent multiple connection attempts
         if (this.isConnecting) {
+            console.log('🔗 WebSocket connection already in progress, waiting...');
             return this.connectionPromise;
         }
 
         this.isConnecting = true;
+        console.log('🔗 Starting new WebSocket connection attempt...');
 
         this.connectionPromise = new Promise((resolve, reject) => {
             const wsUrl = `${this.wsURL}/${this.sessionId}`;
-            console.log('Connecting to WebSocket:', wsUrl);
+            console.log('🔗 Connecting to WebSocket:', wsUrl);
+            console.log('🔗 Session ID:', this.sessionId);
+            console.log('🔗 Base WS URL:', this.wsURL);
 
             this.websocket = new WebSocket(wsUrl);
             
             let connectionTimeout;
+            console.log('🔗 WebSocket object created, readyState:', this.websocket.readyState);
 
-            this.websocket.onopen = () => {
+            this.websocket.onopen = (event) => {
                 clearTimeout(connectionTimeout);
-                console.log('WebSocket connected');
+                console.log('✅ WebSocket connected successfully!');
+                console.log('🔗 Connection event:', event);
+                console.log('🔗 WebSocket readyState:', this.websocket.readyState);
                 this.isConnecting = false;
                 this.reconnectAttempts = 0; // Reset on successful connection
-                resolve();
+                
+                // Small delay to ensure connection is fully stabilized
+                setTimeout(() => {
+                    this.connectionEstablished = true;
+                    console.log('🎉 WebSocket connection fully established and ready');
+                    
+                    // Start keep-alive ping every 20 seconds
+                    this.startKeepAlive();
+                    
+                    resolve();
+                }, 100);
             };
 
             this.websocket.onmessage = (event) => {
+                console.log('📨 WebSocket message received:', event.data);
                 try {
                     const data = JSON.parse(event.data);
+                    console.log('📨 Parsed message:', data);
                     this.handleWebSocketMessage(data);
                 } catch (error) {
-                    console.error('Failed to parse WebSocket message:', error);
+                    console.error('❌ Failed to parse WebSocket message:', error);
+                    console.error('❌ Raw message:', event.data);
                 }
             };
 
-            this.websocket.onclose = () => {
-                console.log('WebSocket disconnected');
+            this.websocket.onclose = (event) => {
+                console.log('🔌 WebSocket disconnected');
+                console.log('🔌 Close event details:', {
+                    code: event.code,
+                    reason: event.reason,
+                    wasClean: event.wasClean
+                });
                 clearTimeout(connectionTimeout);
+                this.stopKeepAlive(); // Stop keep-alive on disconnect
                 this.websocket = null;
                 this.isConnecting = false;
+                this.connectionEstablished = false;
                 this.attemptReconnect();
             };
 
             this.websocket.onerror = (error) => {
-                console.error('WebSocket error:', error);
+                console.error('❌ WebSocket error occurred');
+                console.error('❌ Error event:', error);
+                console.error('❌ WebSocket readyState:', this.websocket ? this.websocket.readyState : 'null');
                 clearTimeout(connectionTimeout);
                 this.isConnecting = false;
                 reject(error);
@@ -73,7 +120,10 @@ class APIClient {
 
             // Timeout after 10 seconds
             connectionTimeout = setTimeout(() => {
+                console.error('⏰ WebSocket connection timeout after 10 seconds');
+                console.error('⏰ WebSocket readyState:', this.websocket ? this.websocket.readyState : 'null');
                 if (this.websocket && this.websocket.readyState !== WebSocket.OPEN) {
+                    console.log('⏰ Closing timed-out connection');
                     this.websocket.close(); // Close the attempting connection
                     this.isConnecting = false;
                     reject(new Error('WebSocket connection timeout'));
@@ -87,7 +137,10 @@ class APIClient {
 
     // Attempt to reconnect with exponential backoff
     attemptReconnect() {
-        if (this.isReconnecting || !this.sessionId) return;
+        if (this.isReconnecting || !this.sessionId) {
+            console.log('🔄 Reconnect skipped: already reconnecting or no session');
+            return;
+        }
 
         this.isReconnecting = true;
         this.reconnectAttempts++;
@@ -95,21 +148,49 @@ class APIClient {
         // Exponential backoff: 2s, 4s, 8s, 16s, 30s max
         const delay = Math.min(30000, Math.pow(2, this.reconnectAttempts) * 1000);
         
-        console.log(`Attempting to reconnect in ${delay / 1000}s...`);
+        console.log(`🔄 Attempting to reconnect in ${delay / 1000}s... (attempt ${this.reconnectAttempts})`);
+        console.log('🔄 Session ID for reconnect:', this.sessionId);
 
-        setTimeout(() => {
-            this.isReconnecting = false;
-            this.connectWebSocket().catch(err => {
-                console.error("Reconnect attempt failed:", err.message);
-            });
-        }, delay);
+        // Check backend health before reconnecting
+        this.checkBackendHealth().then(isHealthy => {
+            console.log('🏥 Backend health check result:', isHealthy);
+            
+            setTimeout(() => {
+                this.isReconnecting = false;
+                console.log('🔄 Starting reconnection attempt...');
+                this.connectWebSocket().catch(err => {
+                    console.error("❌ Reconnect attempt failed:", err.message);
+                    console.error("❌ Full error:", err);
+                });
+            }, delay);
+        }).catch(healthErr => {
+            console.error('🏥 Backend health check failed:', healthErr);
+            // Still try to reconnect even if health check fails
+            setTimeout(() => {
+                this.isReconnecting = false;
+                console.log('🔄 Starting reconnection attempt (despite health check failure)...');
+                this.connectWebSocket().catch(err => {
+                    console.error("❌ Reconnect attempt failed:", err.message);
+                });
+            }, delay);
+        });
     }
 
     // Handle WebSocket messages
     handleWebSocketMessage(data) {
-        console.log('WebSocket message received:', data);
+        console.log('📨 WebSocket message received:', data);
         
         const { type, data: payload } = data;
+        
+        // Handle special system messages
+        if (type === 'connection_established') {
+            console.log('🎉 WebSocket connection establishment confirmed by server');
+            this.connectionEstablished = true;
+        } else if (type === 'keepalive') {
+            console.log('💓 Keepalive received from server');
+        } else if (type === 'pong') {
+            console.log('🏓 Pong received from server');
+        }
         
         // Notify all listeners for this message type
         const typeListeners = this.listeners.get(type) || [];
@@ -117,7 +198,7 @@ class APIClient {
             try {
                 callback(payload);
             } catch (error) {
-                console.error('Error in WebSocket listener:', error);
+                console.error('❌ Error in WebSocket listener:', error, 'for type:', type);
             }
         });
 
@@ -127,7 +208,7 @@ class APIClient {
             try {
                 callback(type, payload);
             } catch (error) {
-                console.error('Error in global WebSocket listener:', error);
+                console.error('❌ Error in global WebSocket listener:', error, 'for type:', type);
             }
         });
     }
@@ -265,25 +346,135 @@ class APIClient {
     // Check backend health
     async checkHealth() {
         try {
+            console.log('🏥 Checking backend health at http://127.0.0.1:8001/health');
             const response = await fetch('http://127.0.0.1:8001/health');
+            console.log('🏥 Health check response status:', response.status);
+            console.log('🏥 Health check response ok:', response.ok);
+            
             if (response.ok) {
-                return await response.json();
+                const healthData = await response.json();
+                console.log('🏥 Backend health check passed:', healthData);
+                return healthData;
             }
-            throw new Error('Backend health check failed');
+            throw new Error(`Backend health check failed with status ${response.status}`);
         } catch (error) {
-            console.error('Health check failed:', error);
+            console.error('🏥 Health check failed:', error);
             throw error;
+        }
+    }
+
+    // Check backend health returning boolean
+    async checkBackendHealth() {
+        try {
+            await this.checkHealth();
+            return true;
+        } catch (error) {
+            console.error('🏥 Backend not healthy:', error);
+            return false;
+        }
+    }
+
+    // Start connection monitoring
+    startConnectionMonitoring() {
+        // Log connection status every 10 seconds
+        this.statusMonitorInterval = setInterval(() => {
+            this.logConnectionStatus();
+        }, 10000);
+    }
+
+    // Start keep-alive mechanism
+    startKeepAlive() {
+        // Clear any existing interval
+        this.stopKeepAlive();
+        
+        console.log('💓 Starting WebSocket keep-alive mechanism');
+        
+        // Send ping every 20 seconds
+        this.keepAliveInterval = setInterval(() => {
+            if (this.websocket && this.websocket.readyState === WebSocket.OPEN) {
+                try {
+                    this.websocket.send('ping');
+                    console.log('💓 Keep-alive ping sent');
+                } catch (error) {
+                    console.error('❌ Failed to send keep-alive ping:', error);
+                    this.stopKeepAlive();
+                }
+            } else {
+                console.log('⚠️ WebSocket not open, stopping keep-alive');
+                this.stopKeepAlive();
+            }
+        }, 20000); // Every 20 seconds
+    }
+
+    // Stop keep-alive mechanism
+    stopKeepAlive() {
+        if (this.keepAliveInterval) {
+            clearInterval(this.keepAliveInterval);
+            this.keepAliveInterval = null;
+            console.log('💔 Keep-alive mechanism stopped');
+        }
+    }
+
+    // Log current connection status
+    logConnectionStatus() {
+        const status = {
+            sessionId: this.sessionId,
+            hasWebSocket: !!this.websocket,
+            readyState: this.websocket ? this.websocket.readyState : 'No WebSocket',
+            readyStateText: this.websocket ? this.getReadyStateText(this.websocket.readyState) : 'No WebSocket',
+            isConnecting: this.isConnecting,
+            isReconnecting: this.isReconnecting,
+            reconnectAttempts: this.reconnectAttempts,
+            connectionEstablished: this.connectionEstablished
+        };
+
+        console.log('📊 WebSocket Status:', status);
+
+        // Additional health checks
+        if (this.websocket && this.websocket.readyState === WebSocket.OPEN) {
+            // Send ping to test connection
+            try {
+                this.websocket.send('ping');
+                console.log('🏓 Ping sent to server');
+            } catch (error) {
+                console.error('❌ Failed to send ping:', error);
+            }
+        }
+    }
+
+    // Get human-readable ready state
+    getReadyStateText(readyState) {
+        switch (readyState) {
+            case WebSocket.CONNECTING: return 'CONNECTING (0)';
+            case WebSocket.OPEN: return 'OPEN (1)';
+            case WebSocket.CLOSING: return 'CLOSING (2)';
+            case WebSocket.CLOSED: return 'CLOSED (3)';
+            default: return `UNKNOWN (${readyState})`;
         }
     }
 
     // Disconnect WebSocket
     disconnect() {
+        console.log('🔌 Disconnecting WebSocket and cleaning up...');
+        
+        // Stop monitoring
+        if (this.statusMonitorInterval) {
+            clearInterval(this.statusMonitorInterval);
+            this.statusMonitorInterval = null;
+        }
+        
+        // Stop keep-alive
+        this.stopKeepAlive();
+        
         if (this.websocket) {
+            console.log('🔌 Closing WebSocket connection...');
             this.websocket.close();
             this.websocket = null;
         }
         this.sessionId = null;
         this.listeners.clear();
+        this.connectionEstablished = false;
+        console.log('✅ WebSocket disconnected and cleaned up');
     }
 
     // Get model recommendations from AI

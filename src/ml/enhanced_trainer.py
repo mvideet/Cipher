@@ -61,9 +61,7 @@ class EnhancedTrainingOrchestrator:
         df = pd.read_csv(dataset_path)
         X, y = self._prepare_data(df, target_col, constraints)
         
-        # Check if PyTorch training is requested
-        include_pytorch = constraints.get("include_pytorch", False)  # Default to False - only enable if explicitly requested
-        pytorch_search_strategy = constraints.get("pytorch_search_strategy", "progressive")
+        # PyTorch training removed from enhanced trainer
         
         # Get LLM recommendations for ensemble strategy
         try:
@@ -172,7 +170,6 @@ class EnhancedTrainingOrchestrator:
         
         # Train individual models for each recommendation
         trained_models = []
-        training_tasks = []
         
         total_architectures = sum(len(model_rec.architectures) for model_rec in ensemble_strategy.recommended_models)
         logger.info(f"🏗️ Training {total_architectures} model architectures...")
@@ -184,112 +181,50 @@ class EnhancedTrainingOrchestrator:
             "progress": 0
         })
         
+        # Train models sequentially to avoid resource contention
+        completed_count = 0
         for model_rec in ensemble_strategy.recommended_models:
+            # Check if this is a neural network - train them one at a time
+            is_neural_network = model_rec.model_type == "neural_network"
+            
+            if is_neural_network:
+                logger.info("🧠 Training neural networks sequentially to avoid resource contention")
+                
             for arch in model_rec.architectures:
-                task = asyncio.create_task(
-                    self._train_model_architecture(
+                try:
+                    logger.info(f"🔄 Training architecture {completed_count + 1}/{total_architectures}: {model_rec.model_type}_{arch['name']}")
+                    
+                    # Train the model
+                    result = await self._train_model_architecture(
                         model_rec, arch, X_train, X_val, y_train, y_val,
                         task_type, metric, constraints
                     )
-                )
-                training_tasks.append(task)
-        
-        # Wait for all training to complete
-        results = await asyncio.gather(*training_tasks, return_exceptions=True)
-        
-        # Process results
-        failed_count = 0
-        for i, result in enumerate(results):
-            if isinstance(result, Exception):
-                logger.error(f"❌ Training failed for model {i}", error=str(result))
-                failed_count += 1
-                continue
+                    
             trained_models.append(result)
+                    completed_count += 1
             
-            # Send model completion update
+                    # Send progress update
             await self._send_training_status_update("model_completed", {
-                "message": f"Model {len(trained_models)}/{len(results) - failed_count} completed",
-                "completed": len(trained_models),
-                "total": len(results) - failed_count,
-                "progress": int((len(trained_models) / max(1, len(results) - failed_count)) * 100)
-            })
+                        "message": f"Model {completed_count}/{total_architectures} completed",
+                        "completed": completed_count,
+                        "total": total_architectures,
+                        "progress": int((completed_count / total_architectures) * 100)
+                    })
+                    
+                except Exception as e:
+                    logger.error(f"❌ Training failed for {model_rec.model_type}_{arch['name']}", error=str(e))
+                    completed_count += 1
+                    continue
         
         if not trained_models:
             raise ValueError("All model training failed")
         
         logger.info("🎯 Model training complete", 
                    successful=len(trained_models),
-                   failed=failed_count)
+                   failed=total_architectures - len(trained_models))
         
-        # Check if neural networks were recommended by LLM - if so, enable PyTorch NAS
-        has_neural_networks = any(
-            model_rec.model_type == "neural_network" 
-            for model_rec in ensemble_strategy.recommended_models
-        )
-        
-        # Add PyTorch models if neural networks were recommended OR explicitly requested, and time permits
-        pytorch_models = []
-        # Check for explicit PyTorch enablement or force flag
-        force_pytorch = constraints.get('force_pytorch', False)
-        explicit_pytorch = constraints.get('include_pytorch', False)
-        include_pytorch = explicit_pytorch or has_neural_networks or force_pytorch
-        
-        if has_neural_networks:
-            logger.info("🧠 Neural networks detected in LLM recommendations - enabling PyTorch NAS")
-        elif force_pytorch:
-            logger.info("🚀 PyTorch NAS force-enabled - will run regardless of LLM recommendations")
-        elif explicit_pytorch:
-            logger.info("🔧 PyTorch training explicitly enabled by user")
-        if include_pytorch and time.time() - self.start_time < self.max_time_seconds * 0.7:
-            try:
-                remaining_time = self.max_time_seconds * 0.7 - (time.time() - self.start_time)
-                logger.info("🧠 Starting PyTorch Neural Architecture Search", 
-                           remaining_time_minutes=f"{remaining_time/60:.1f}",
-                           architectures=["SimpleMLP", "ResNetMLP", "AttentionMLP"])
-                
-                # Send PyTorch training start update
-                await self._send_training_status_update("pytorch_training", {
-                    "message": "Starting PyTorch Neural Architecture Search (NAS)",
-                    "phase": "pytorch_nas",
-                    "architectures": ["SimpleMLP", "ResNetMLP", "AttentionMLP"],
-                    "search_strategy": constraints.get('pytorch_strategy', 'progressive')
-                })
-                
-                from .pytorch_trainer import PyTorchTrainer
-                pytorch_trainer = PyTorchTrainer(self.run_id, self.session_id, self.websocket_manager)
-                
-                pytorch_models = await pytorch_trainer.train_pytorch_models(
-                    dataset_path=dataset_path,
-                    target_col=target_col,
-                    task_type=task_type,
-                    metric=metric,
-                    constraints=constraints,
-                    data_profile=data_profile,
-                    search_strategy=constraints.get('pytorch_strategy', 'fast')
-                )
-                
-                logger.info("🎯 PyTorch training complete", 
-                           n_pytorch_models=len(pytorch_models))
-                
-                # Send PyTorch completion update
-                await self._send_training_status_update("pytorch_completed", {
-                    "message": f"PyTorch training completed - {len(pytorch_models)} models",
-                    "pytorch_models": len(pytorch_models)
-                })
-                
-            except Exception as e:
-                logger.error("PyTorch training failed", error=str(e))
-                # Continue with sklearn models only
-        elif include_pytorch:
-            elapsed_time = time.time() - self.start_time
-            logger.warning("⏰ Skipping PyTorch NAS due to time constraints", 
-                          elapsed_minutes=f"{elapsed_time/60:.1f}",
-                          max_time_minutes=f"{self.max_time_seconds/60:.1f}")
-        else:
-            logger.info("🚫 PyTorch NAS disabled - no neural networks in LLM recommendations")
-        
-        # Combine sklearn and PyTorch models
-        all_trained_models = trained_models + pytorch_models
+        # Use only sklearn models (PyTorch removed)
+        all_trained_models = trained_models
         
         # Create ensemble
         logger.info("🔗 Creating ensemble...")
@@ -298,7 +233,6 @@ class EnhancedTrainingOrchestrator:
         await self._send_training_status_update("creating_ensemble", {
             "message": f"Creating ensemble from {len(all_trained_models)} models",
             "sklearn_models": len(trained_models),
-            "pytorch_models": len(pytorch_models),
             "total_models": len(all_trained_models)
         })
         
@@ -310,7 +244,6 @@ class EnhancedTrainingOrchestrator:
         logger.info("🎉 Enhanced training completed", 
                    final_score=f"{best_ensemble.val_score:.4f}",
                    sklearn_models=len(trained_models),
-                   pytorch_models=len(pytorch_models),
                    total_models=len(all_trained_models))
         
         return best_ensemble
@@ -514,13 +447,8 @@ class EnhancedTrainingOrchestrator:
         model_name = f"{model_rec.model_type}_{architecture['name']}"
         logger.info(f"Training {model_name}", complexity=architecture['complexity'])
         
-        # Special handling for neural networks - use PyTorch instead of sklearn MLP
-        if model_rec.model_type == "neural_network":
-            logger.info(f"🧠 Using PyTorch neural network for {model_name} instead of sklearn MLP")
-            return await self._train_pytorch_architecture(
-                model_rec, architecture, X_train, X_val, y_train, y_val,
-                task_type, metric, constraints
-            )
+        # Neural networks use sklearn MLP (PyTorch removed)
+        # Continue with normal sklearn model training
         
         # Create preprocessing pipeline for sklearn models
         preprocessor = self._create_preprocessor(X_train, constraints)
@@ -623,167 +551,7 @@ class EnhancedTrainingOrchestrator:
             train_score=train_score
         )
     
-    async def _train_pytorch_architecture(
-        self,
-        model_rec: ModelRecommendation,
-        architecture: Dict[str, Any],
-        X_train: pd.DataFrame,
-        X_val: pd.DataFrame,
-        y_train: pd.Series,
-        y_val: pd.Series,
-        task_type: str,
-        metric: str,
-        constraints: Dict[str, Any]
-    ) -> ModelArtifact:
-        """Train a PyTorch neural network architecture using the existing PyTorchTrainer"""
-        
-        model_name = f"{model_rec.model_type}_{architecture['name']}"
-        logger.info(f"🧠 Training PyTorch neural network: {model_name}",
-                   architecture_config=architecture,
-                   input_shape=X_train.shape,
-                   target_shape=y_train.shape,
-                   task_type=task_type,
-                   metric=metric)
-        
-        try:
-            # Use the existing PyTorchTrainer instead of reimplementing
-            from .pytorch_trainer import PyTorchTrainer
-            
-            # Create temporary dataset file from train/val data
-            import tempfile
-            import pandas as pd
-            from pathlib import Path
-            
-            # Combine train and validation data back into a single dataset
-            # The PyTorchTrainer will split it again, but this ensures consistent preprocessing
-            X_combined = pd.concat([X_train, X_val], axis=0, ignore_index=True)
-            y_combined = pd.concat([y_train, y_val], axis=0, ignore_index=True)
-            
-            combined_df = X_combined.copy()
-            combined_df[y_train.name or 'target'] = y_combined
-            
-            # Save temporary dataset
-            temp_dir = Path(settings.TEMP_DIR)
-            temp_dir.mkdir(parents=True, exist_ok=True)
-            temp_dataset_path = temp_dir / f"{self.run_id}_{model_name}_temp.csv"
-            combined_df.to_csv(temp_dataset_path, index=False)
-            
-            logger.info(f"🔄 Created temporary dataset for {model_name}: {temp_dataset_path}")
-            
-            # Create PyTorchTrainer instance with the same websocket manager
-            pytorch_trainer = PyTorchTrainer(self.run_id, self.session_id, self.websocket_manager)
-            
-            # Create a minimal data profile for the trainer
-            from ..models.schema import DataProfile
-            data_profile = DataProfile(
-                n_rows=len(combined_df),
-                n_cols=len(combined_df.columns) - 1,  # Exclude target column
-                columns={
-                    'categorical_cols': [],
-                    'numeric_cols': list(combined_df.select_dtypes(include=['number']).columns),
-                    'missing_values': {},
-                    'target_distribution': {}
-                },
-                issues=[]
-            )
-            
-            # Configure constraints for single architecture training
-            pytorch_constraints = constraints.copy()
-            pytorch_constraints.update({
-                "pytorch_search_strategy": "fast",  # Quick search for each architecture
-                "force_pytorch": True,  # Ensure PyTorch is enabled
-                "include_pytorch": True
-            })
-            
-            logger.info(f"🚀 Starting PyTorch training for {model_name}")
-            
-            # Send progress update
-            await self._send_training_status_update("neural_network_training", {
-                "message": f"Training PyTorch neural network: {model_name}",
-                "model_name": model_name,
-                "using_pytorch_trainer": True
-            })
-            
-            # Use the existing PyTorchTrainer to train models
-            pytorch_models = await pytorch_trainer.train_pytorch_models(
-                dataset_path=str(temp_dataset_path),
-                target_col=y_train.name or 'target',
-                task_type=task_type,
-                metric=metric,
-                constraints=pytorch_constraints,
-                data_profile=data_profile,
-                search_strategy="fast"
-            )
-            
-            # Clean up temporary file
-            try:
-                temp_dataset_path.unlink()
-            except:
-                pass
-            
-            if not pytorch_models:
-                raise ValueError(f"PyTorchTrainer returned no models for {model_name}")
-            
-            # Get the best model from the results
-            best_model = max(pytorch_models, key=lambda x: x.val_score if metric in ['accuracy', 'precision', 'recall', 'f1'] else -x.val_score)
-            
-            # Rename the model to match the architecture name
-            original_path = Path(best_model.model_path)
-            new_path = original_path.parent / f"{model_name}_pytorch.pth"
-            
-            # Copy the model file to the new name
-            import shutil
-            shutil.copy2(original_path, new_path)
-            
-            # Update the model artifact
-            result_model = ModelArtifact(
-                run_id=self.run_id,
-                family=model_name,
-                model_path=str(new_path),
-                val_score=best_model.val_score,
-                train_score=best_model.train_score
-            )
-            
-            await self._send_architecture_completion(model_name, best_model.val_score)
-            
-            logger.info(f"✅ PyTorch neural network {model_name} training completed", 
-                       val_score=f"{best_model.val_score:.4f}",
-                       train_score=f"{best_model.train_score:.4f}",
-                       model_path=str(new_path))
-            
-            return result_model
-            
-        except Exception as e:
-            logger.error(f"❌ PyTorch neural network training failed for {model_name}", 
-                        error=str(e),
-                        error_type=type(e).__name__)
-            
-            # Fallback: create a dummy model with poor performance to avoid breaking the ensemble
-            await self._send_architecture_completion(model_name, 0.0)
-            
-            # Create a minimal model artifact to prevent ensemble creation from failing
-            model_dir = Path(settings.MODELS_DIR) / self.run_id
-            model_dir.mkdir(parents=True, exist_ok=True)
-            fallback_path = model_dir / f"{model_name}_failed.pkl"
-            
-            fallback_info = {
-                "model_type": "failed_pytorch",
-                "error": str(e),
-                "val_score": 0.0,
-                "train_score": 0.0
-            }
-            
-            import pickle
-            with open(fallback_path, 'wb') as f:
-                pickle.dump(fallback_info, f)
-            
-            return ModelArtifact(
-                run_id=self.run_id,
-                family=model_name,
-                model_path=str(fallback_path),
-                val_score=0.0,
-                train_score=0.0
-            )
+    # PyTorch architecture training method removed completely
     
     async def _create_ensemble(
         self,
@@ -802,26 +570,14 @@ class EnhancedTrainingOrchestrator:
                    method=ensemble_strategy.ensemble_method,
                    n_models=len(trained_models))
         
-        # Load trained models, handling both sklearn and PyTorch models
+        # Load trained models (PyTorch support removed)
         estimators = []
-        pytorch_models = []
         
         for model_artifact in trained_models:
             try:
-                # Check if this is a PyTorch model
-                if model_artifact.model_path.endswith('.pth') or 'pytorch' in model_artifact.family.lower():
-                    logger.info(f"Skipping PyTorch model {model_artifact.family} from sklearn ensemble")
-                    pytorch_models.append(model_artifact)
-                    continue
-                    
-                # Load sklearn models normally
+                # Load sklearn models
                 with open(model_artifact.model_path, 'rb') as f:
                     model_or_info = pickle.load(f)
-                
-                # Handle failed models
-                if isinstance(model_or_info, dict) and model_or_info.get("model_type") == "failed_pytorch":
-                    logger.warning(f"Skipping failed PyTorch model {model_artifact.family}")
-                    continue
                 
                 # Handle sklearn pipeline/model
                 estimators.append((model_artifact.family, model_or_info))
@@ -833,9 +589,6 @@ class EnhancedTrainingOrchestrator:
         
         if not estimators:
             raise ValueError("No valid sklearn models available for ensemble creation")
-        
-        if pytorch_models:
-            logger.info(f"Note: {len(pytorch_models)} PyTorch models were trained but excluded from sklearn ensemble")
         
         # Create ensemble based on strategy
         if ensemble_strategy.ensemble_method == "voting":
@@ -933,8 +686,9 @@ class EnhancedTrainingOrchestrator:
             elif model_type == "lightgbm":
                 return lgb.LGBMClassifier(**safe_config, verbose=-1) if task_type == "classification" else lgb.LGBMRegressor(**safe_config, verbose=-1)
             elif model_type == "neural_network":
-                # Neural networks are now handled by PyTorch - this should not be called
-                raise ValueError("Neural networks should be handled by PyTorch trainer, not sklearn MLPClassifier")
+                # Use sklearn MLPClassifier/MLPRegressor for neural networks
+                from sklearn.neural_network import MLPClassifier, MLPRegressor
+                return MLPClassifier(**safe_config) if task_type == "classification" else MLPRegressor(**safe_config)
             elif model_type == "svm":
                 return SVC(**safe_config, probability=True) if task_type == "classification" else SVR(**safe_config)
             elif model_type == "logistic_regression":

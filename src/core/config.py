@@ -36,10 +36,7 @@ class Settings(BaseSettings):
     MAX_OPTUNA_TRIALS: int = 20
     TRAINING_PROCESSES: int = 3
     
-    # PyTorch Configuration
-    PYTORCH_ENABLED: bool = True
-    PYTORCH_SEARCH_STRATEGY: str = "progressive"  # progressive, optuna, random
-    PYTORCH_MAX_TIME_MINUTES: int = 8  # Time allocated to PyTorch training
+    # PyTorch removed from configuration
     
     # File Upload Limits
     MAX_FILE_SIZE_MB: int = 100

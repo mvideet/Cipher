@@ -812,15 +812,7 @@ body {
     border-left: 3px solid #f59e0b;
 }
 
-.log-entry.pytorch_start {
-    background: #fdf2f8;
-    border-left: 3px solid #ec4899;
-}
-
-.log-entry.pytorch_complete {
-    background: #ecfdf5;
-    border-left: 3px solid #10b981;
-}
+/* PyTorch styles removed */
 
 .log-model {
     color: #3b82f6;

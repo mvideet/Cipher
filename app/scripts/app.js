@@ -108,7 +108,7 @@ class AutoMLApp {
                 this.handleTrainingStatus(data);
             });
             
-            // Handle detailed PyTorch training events
+            // Handle detailed training events
             apiClient.addEventListener('training_start', (data) => {
                 this.handleTrainingStart(data);
             });
@@ -125,13 +125,7 @@ class AutoMLApp {
                 this.handleEarlyStopping(data);
             });
             
-            apiClient.addEventListener('pytorch_training_start', (data) => {
-                this.handlePyTorchTrainingStart(data);
-            });
-            
-            apiClient.addEventListener('pytorch_training_complete', (data) => {
-                this.handlePyTorchTrainingComplete(data);
-            });
+            // PyTorch event listeners removed
             
         } catch (error) {
             console.warn('WebSocket connection failed:', error);
@@ -414,31 +408,7 @@ class AutoMLApp {
         });
     }
 
-    // Handle PyTorch training start
-    handlePyTorchTrainingStart(data) {
-        console.log('PyTorch training start received:', data);
-        uiManager.addTrainingLog({
-            family: 'pytorch',
-            trial: 0,
-            val_metric: null,
-            elapsed_s: 0,
-            message: data.message,
-            type: 'pytorch_start'
-        });
-    }
-
-    // Handle PyTorch training complete
-    handlePyTorchTrainingComplete(data) {
-        console.log('PyTorch training complete received:', data);
-        uiManager.addTrainingLog({
-            family: 'pytorch',
-            trial: data.models_trained || 0,
-            val_metric: data.best_validation_score,
-            elapsed_s: 0,
-            message: data.message,
-            type: 'pytorch_complete'
-        });
-    }
+    // PyTorch training handlers removed
 
     // Cleanup resources
     cleanup() {
