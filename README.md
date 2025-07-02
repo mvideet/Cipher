@@ -141,7 +141,7 @@ The application automatically:
 - Performs feature selection if requested
 - Uses cross-validation for small datasets (<500 rows)
 
-### Model Families
+### Model Families (Not all of them are functional as of now)
 
 - **Tree-Based Models**: XGBoost, LightGBM, Random Forest
 - **Instance-Based Models**: SVM (linear, RBF, polynomial), K-Nearest Neighbors (KNN)
