@@ -223,6 +223,17 @@ For issues and questions:
    - Error messages
    - System information (OS, Python version, Node.js version)
 
+## Recent Updates
+
+### UI Fixes
+- Adjusted the layout in the Enhanced Model Training section to remove unnecessary text and improve card positioning.
+
+### Training Error Fix
+- Resolved the error related to specifying columns using strings for non-DataFrame objects by ensuring proper column handling in the `_prepare_data` method.
+
+### Ensemble Training
+- Implemented ensemble training strategies such as voting and stacking to enhance model performance. This process involves creating an ensemble from trained models, leveraging their strengths for better predictions.
+
 ---
 
 **Note**: This application requires an OpenAI API key for optimal functionality. Without it, prompt parsing will be limited to basic pattern matching. 
