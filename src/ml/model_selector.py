@@ -29,6 +29,8 @@ from sklearn.linear_model import (
 )
 from sklearn.naive_bayes import GaussianNB, MultinomialNB
 from sklearn.neighbors import KNeighborsClassifier, KNeighborsRegressor
+from sklearn.cluster import KMeans, DBSCAN, AgglomerativeClustering, SpectralClustering
+from sklearn.mixture import GaussianMixture
 import lightgbm as lgb
 import xgboost as xgb
 
@@ -256,8 +258,8 @@ Output ONLY valid JSON matching this schema:
 {
   "recommended_models": [
     {
-      "model_type": "random_forest" | "xgboost" | "lightgbm" | "neural_network" | "svm" | "logistic_regression" | "linear_regression" | "knn" | "naive_bayes",
-      "model_family": "tree_based" | "linear" | "neural" | "ensemble" | "instance_based" | "probabilistic",
+              "model_type": "random_forest" | "xgboost" | "lightgbm" | "neural_network" | "svm" | "logistic_regression" | "linear_regression" | "knn" | "naive_bayes" | "kmeans" | "dbscan" | "hierarchical" | "spectral" | "gaussian_mixture",
+        "model_family": "tree_based" | "linear" | "neural" | "ensemble" | "instance_based" | "probabilistic" | "clustering",
       "complexity_score": 1-10,
       "expected_training_time": "fast" | "medium" | "slow",
       "parameter_estimates": {
@@ -441,6 +443,98 @@ Recommend an ensemble of 3-5 diverse models optimized for this dataset."""
                 }
             ]
             
+        elif model_type == "kmeans":
+            # K-means clustering architectures
+            architectures = [
+                {
+                    "name": "simple_kmeans",
+                    "description": "Simple K-means clustering",
+                    "config": {"n_clusters": 3, "init": "k-means++", "n_init": 10},
+                    "complexity": "low"
+                },
+                {
+                    "name": "optimized_kmeans",
+                    "description": "Optimized K-means with better initialization",
+                    "config": {"n_clusters": 5, "init": "k-means++", "n_init": 20, "algorithm": "elkan"},
+                    "complexity": "medium"
+                },
+                {
+                    "name": "robust_kmeans",
+                    "description": "Robust K-means with multiple restarts",
+                    "config": {"n_clusters": 8, "init": "k-means++", "n_init": 50, "algorithm": "elkan"},
+                    "complexity": "high"
+                }
+            ]
+            
+        elif model_type == "dbscan":
+            # DBSCAN clustering architectures
+            architectures = [
+                {
+                    "name": "loose_dbscan",
+                    "description": "Loose clustering for broader groups",
+                    "config": {"eps": 0.5, "min_samples": 5},
+                    "complexity": "low"
+                },
+                {
+                    "name": "balanced_dbscan",
+                    "description": "Balanced density clustering",
+                    "config": {"eps": 0.3, "min_samples": 10},
+                    "complexity": "medium"
+                },
+                {
+                    "name": "tight_dbscan",
+                    "description": "Tight clustering for dense groups",
+                    "config": {"eps": 0.1, "min_samples": 20},
+                    "complexity": "high"
+                }
+            ]
+            
+        elif model_type == "hierarchical":
+            # Hierarchical clustering architectures
+            architectures = [
+                {
+                    "name": "ward_hierarchical",
+                    "description": "Ward linkage for compact clusters",
+                    "config": {"n_clusters": 3, "linkage": "ward"},
+                    "complexity": "low"
+                },
+                {
+                    "name": "complete_hierarchical",
+                    "description": "Complete linkage for balanced clusters",
+                    "config": {"n_clusters": 5, "linkage": "complete"},
+                    "complexity": "medium"
+                },
+                {
+                    "name": "average_hierarchical",
+                    "description": "Average linkage for robust clustering",
+                    "config": {"n_clusters": 8, "linkage": "average"},
+                    "complexity": "high"
+                }
+            ]
+            
+        elif model_type == "gaussian_mixture":
+            # Gaussian Mixture Model architectures
+            architectures = [
+                {
+                    "name": "simple_gmm",
+                    "description": "Simple Gaussian Mixture Model",
+                    "config": {"n_components": 3, "covariance_type": "full"},
+                    "complexity": "low"
+                },
+                {
+                    "name": "diagonal_gmm",
+                    "description": "Diagonal covariance GMM",
+                    "config": {"n_components": 5, "covariance_type": "diag"},
+                    "complexity": "medium"
+                },
+                {
+                    "name": "tied_gmm",
+                    "description": "Tied covariance GMM",
+                    "config": {"n_components": 8, "covariance_type": "tied"},
+                    "complexity": "high"
+                }
+            ]
+            
         else:
             # Default simple architectures for other models
             architectures = [
@@ -492,12 +586,21 @@ Recommend an ensemble of 3-5 diverse models optimized for this dataset."""
         fallback_models = []
         
         # Simple rule-based fallback
-        if data_profile.n_rows < 1000:
-            # Small dataset - use simple models
-            models = ["logistic_regression", "random_forest", "naive_bayes"] if task_type == "classification" else ["linear_regression", "random_forest", "knn"]
+        if task_type == "clustering":
+            # Clustering models
+            if data_profile.n_rows < 1000:
+                models = ["kmeans", "hierarchical", "dbscan"]
+            else:
+                models = ["kmeans", "dbscan", "gaussian_mixture", "hierarchical"]
+        elif data_profile.n_rows < 1000:
+            # Small dataset - use simple, robust models
+            models = ["logistic_regression", "random_forest"] if task_type == "classification" else ["linear_regression", "random_forest"]
+        elif data_profile.n_rows < 5000:
+            # Medium dataset - balanced approach with proven models
+            models = ["logistic_regression", "random_forest", "xgboost"] if task_type == "classification" else ["linear_regression", "random_forest", "xgboost"]
         else:
-            # Larger dataset - can use complex models
-            models = ["random_forest", "xgboost", "neural_network"] if task_type == "classification" else ["random_forest", "xgboost", "neural_network"]
+            # Large dataset - can use more complex models but keep it balanced
+            models = ["random_forest", "xgboost", "lightgbm"] if task_type == "classification" else ["random_forest", "xgboost", "lightgbm"]
         
         for model_type in models:
             fallback_models.append(ModelRecommendation(
@@ -533,7 +636,12 @@ Recommend an ensemble of 3-5 diverse models optimized for this dataset."""
             "logistic_regression": "linear",
             "linear_regression": "linear",
             "knn": "instance_based",
-            "naive_bayes": "probabilistic"
+            "naive_bayes": "probabilistic",
+            "kmeans": "clustering",
+            "dbscan": "clustering",
+            "hierarchical": "clustering",
+            "spectral": "clustering",
+            "gaussian_mixture": "clustering"
         }
         return family_map.get(model_type, "unknown")
     
@@ -560,5 +668,12 @@ Recommend an ensemble of 3-5 diverse models optimized for this dataset."""
             },
             "probabilistic": {
                 "naive_bayes": {"class": GaussianNB, "regressor": None}
+            },
+            "clustering": {
+                "kmeans": {"class": KMeans, "regressor": None},
+                "dbscan": {"class": DBSCAN, "regressor": None},
+                "hierarchical": {"class": AgglomerativeClustering, "regressor": None},
+                "spectral": {"class": SpectralClustering, "regressor": None},
+                "gaussian_mixture": {"class": GaussianMixture, "regressor": None}
             }
         } 

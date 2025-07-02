@@ -286,7 +286,45 @@
                             </div>
                         </div>
 
-                        <div class="explanations">
+                        <!-- Clustering Results Section -->
+                        <div id="clusteringResults" class="clustering-results" style="display: none;">
+                            <h3>Cluster Analysis</h3>
+                            <div class="clustering-content">
+                                <div class="cluster-overview">
+                                    <div class="cluster-stats">
+                                        <div class="stat-card">
+                                            <h4>Clusters Found</h4>
+                                            <span id="clusterCount" class="stat-value">-</span>
+                                        </div>
+                                        <div class="stat-card">
+                                            <h4>Silhouette Score</h4>
+                                            <span id="silhouetteScore" class="stat-value">-</span>
+                                        </div>
+                                        <div class="stat-card">
+                                            <h4>Algorithm Used</h4>
+                                            <span id="clusterAlgorithm" class="stat-value">-</span>
+                                        </div>
+                                    </div>
+                                </div>
+                                
+                                <div class="cluster-visualization">
+                                    <h4>Cluster Distribution</h4>
+                                    <div id="clusterChart" class="chart-container">
+                                        <!-- Cluster chart will be rendered here -->
+                                    </div>
+                                </div>
+                                
+                                <div class="cluster-details">
+                                    <h4>Cluster Summary</h4>
+                                    <div id="clusterTable" class="cluster-table">
+                                        <!-- Cluster details table will be rendered here -->
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Supervised Learning Explanations Section -->
+                        <div id="supervisedExplanations" class="explanations">
                             <h3>Model Explanations</h3>
                             <div class="explanation-content">
                                 <div class="feature-importance">

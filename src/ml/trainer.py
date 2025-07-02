@@ -324,7 +324,9 @@ class TrainingOrchestrator:
             if task_type == "classification":
                 return {
                     "C": trial.suggest_float("C", 1e-3, 1e3, log=True),
-                    "max_iter": 1000
+                    "solver": trial.suggest_categorical("solver", ["saga", "lbfgs"]),
+                    "max_iter": 2000,
+                    "tol": 1e-4
                 }
             else:
                 return {}
@@ -357,7 +359,15 @@ class TrainingOrchestrator:
         
         if family == "baseline":
             if task_type == "classification":
-                return LogisticRegression(**params, random_state=42)
+                # Add robust defaults for better convergence
+                lr_defaults = {
+                    "max_iter": 2000, 
+                    "solver": "saga",
+                    "tol": 1e-4,
+                    "random_state": 42
+                }
+                lr_params = {**lr_defaults, **params}
+                return LogisticRegression(**lr_params)
             else:
                 return LinearRegression(**params)
         

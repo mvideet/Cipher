@@ -93,7 +93,134 @@ class PromptParser:
         
         except Exception as e:
             logger.error("Failed to parse prompt", error=str(e))
+            
+            # Try fallback parsing first
+            fallback_result = self._fallback_parse(request)
+            if fallback_result:
+                return fallback_result
+            
             raise ValueError(f"Prompt parsing failed: {str(e)}")
+    
+    def _fallback_parse(self, prompt_request: PromptRequest) -> Optional[PromptResponse]:
+        """Fallback parsing without LLM"""
+        try:
+            prompt = prompt_request.prompt.lower()
+            dataset_preview = prompt_request.dataset_preview
+            
+            if not dataset_preview:
+                return None
+            
+            columns = dataset_preview.get("columns", [])
+            
+            # Detect clustering
+            clustering_keywords = ["cluster", "segment", "group", "pattern", "unsupervised"]
+            if any(keyword in prompt for keyword in clustering_keywords):
+                # Check if no target is mentioned
+                target_mentioned = any(col.lower() in prompt for col in columns)
+                if not target_mentioned:
+                    return PromptResponse(
+                        task="clustering",
+                        target="",  # No target for clustering
+                        metric="silhouette",
+                        constraints={},
+                        clarifications_needed=None
+                    )
+            
+            # Try to extract target column
+            target_col = None
+            
+            # Look for explicit "predict X" patterns
+            for col in columns:
+                if f"predict {col.lower()}" in prompt:
+                    target_col = col
+                    break
+            
+            # Look for column names mentioned in the prompt
+            if not target_col:
+                for col in columns:
+                    if col.lower() in prompt:
+                        target_col = col
+                        break
+            
+            # Look for common target indicators
+            if not target_col:
+                target_indicators = ["target", "label", "class", "outcome", "result", "churn", "price", "value"]
+                for col in columns:
+                    if any(indicator in col.lower() for indicator in target_indicators):
+                        target_col = col
+                        break
+            
+            if not target_col:
+                return None  # Can't determine target
+            
+            # Determine task type
+            classification_keywords = ["classify", "classification", "predict category", "predict class"]
+            regression_keywords = ["regress", "regression", "predict value", "predict amount", "predict price"]
+            
+            if any(keyword in prompt for keyword in classification_keywords):
+                task = "classification"
+                metric = "accuracy"
+            elif any(keyword in prompt for keyword in regression_keywords):
+                task = "regression"
+                metric = "rmse"
+            else:
+                # Guess based on target column name
+                if any(word in target_col.lower() for word in ["class", "category", "type", "churn", "status"]):
+                    task = "classification"
+                    metric = "accuracy"
+                else:
+                    # Use data profiler logic for proper task type detection
+                    sample_data = dataset_preview.get("sample_rows", [])
+                    if sample_data and target_col in sample_data[0]:
+                        # Get target values from sample data
+                        sample_values = [row.get(target_col) for row in sample_data if row.get(target_col) is not None]
+                        
+                        if sample_values:
+                            # Count unique values in sample
+                            unique_sample_values = set(sample_values)
+                            is_all_numeric = all(isinstance(val, (int, float)) for val in sample_values)
+                            
+                            # Use proper classification detection logic
+                            if is_all_numeric and all(val == int(val) for val in sample_values if isinstance(val, (int, float))):
+                                # All integer values - check if likely categorical
+                                min_val = min(sample_values)
+                                max_val = max(sample_values)
+                                value_range = max_val - min_val if len(unique_sample_values) > 1 else 0
+                                
+                                # Classification if: very few unique values OR small range with few values
+                                if len(unique_sample_values) <= 5 or (len(unique_sample_values) <= 10 and value_range <= 10):
+                                    task = "classification"
+                                    metric = "accuracy"
+                                else:
+                                    # Likely continuous integers (age, count, etc.) - regression
+                                    task = "regression"
+                                    metric = "rmse"
+                            elif not is_all_numeric:
+                                # Non-numeric - classification
+                                task = "classification" 
+                                metric = "accuracy"
+                            else:
+                                # Mixed or float values - regression
+                                task = "regression"
+                                metric = "rmse"
+                        else:
+                            task = "classification"
+                            metric = "accuracy"
+                    else:
+                        task = "classification"
+                        metric = "accuracy"
+            
+            return PromptResponse(
+                task=task,
+                target=target_col,
+                metric=metric,
+                constraints={},
+                clarifications_needed=None
+            )
+            
+        except Exception as e:
+            logger.error("Fallback parsing failed", error=str(e))
+            return None
     
     def _get_system_prompt(self) -> str:
         """Get the system prompt for GPT-4"""

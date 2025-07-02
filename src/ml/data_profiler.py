@@ -392,7 +392,7 @@ class DataProfiler:
         
         return suggestions
     
-    def validate_for_ml(self, df: pd.DataFrame, target_col: str) -> Dict[str, Any]:
+    def validate_for_ml(self, df: pd.DataFrame, target_col: str = None) -> Dict[str, Any]:
         """Validate dataset for ML training and return actionable insights"""
         
         validation_results = {
@@ -409,57 +409,79 @@ class DataProfiler:
             validation_results["errors"].append("Dataset is empty")
             validation_results["is_ready"] = False
             return validation_results
-        
-        if target_col not in df.columns:
+
+        # If no target column provided, suggest clustering
+        if target_col is None or target_col == "":
+            task_type = "clustering"
+            validation_results["target_analysis"]["task_type"] = "clustering"
+            validation_results["target_analysis"]["note"] = "No target variable specified - suitable for clustering analysis"
+            
+            # Add clustering-specific suggestions
+            validation_results["suggestions"].append("Consider K-means clustering for customer segmentation")
+            validation_results["suggestions"].append("Try DBSCAN for density-based pattern discovery")
+            validation_results["suggestions"].append("Use hierarchical clustering for taxonomy discovery")
+            
+        elif target_col not in df.columns:
             validation_results["errors"].append(f"Target column '{target_col}' not found in dataset")
             validation_results["is_ready"] = False
             return validation_results
-        
-        # Analyze target column
-        target_series = df[target_col]
-        target_null_count = target_series.isnull().sum()
-        
-        if target_null_count > 0:
-            validation_results["errors"].append(f"Target column has {target_null_count} missing values")
-            validation_results["is_ready"] = False
-        
-        # Determine task type from target
-        target_unique = target_series.nunique()
-        if target_unique <= 20 and target_series.dtype in ['object', 'bool'] or all(target_series.dropna().astype(str).str.isdigit()):
-            task_type = "classification"
-            validation_results["target_analysis"]["task_type"] = "classification"
-            validation_results["target_analysis"]["n_classes"] = target_unique
-            
-            # Check class balance
-            class_counts = target_series.value_counts()
-            min_class_size = class_counts.min()
-            max_class_size = class_counts.max()
-            imbalance_ratio = max_class_size / min_class_size if min_class_size > 0 else float('inf')
-            
-            if imbalance_ratio > 10:
-                validation_results["warnings"].append(f"Severe class imbalance detected (ratio: {imbalance_ratio:.1f})")
-                validation_results["suggestions"].append("Consider using class_weight='balanced' or resampling techniques")
-            
-            if min_class_size < 5:
-                validation_results["warnings"].append(f"Some classes have very few samples (min: {min_class_size})")
-                validation_results["suggestions"].append("Consider combining rare classes or collecting more data")
-        
         else:
-            task_type = "regression"
-            validation_results["target_analysis"]["task_type"] = "regression"
+            # Analyze target column for supervised learning
+            target_series = df[target_col]
+            target_null_count = target_series.isnull().sum()
             
-            # Check target distribution
-            target_clean = target_series.dropna()
-            if len(target_clean) > 0:
-                skewness = target_clean.skew()
-                if abs(skewness) > 2:
-                    validation_results["warnings"].append(f"Target variable is highly skewed (skew: {skewness:.2f})")
-                    validation_results["suggestions"].append("Consider log transformation for target variable")
+            if target_null_count > 0:
+                validation_results["errors"].append(f"Target column has {target_null_count} missing values")
+                validation_results["is_ready"] = False
+            
+            # Determine task type from target
+            target_unique = target_series.nunique()
+            
+            # Classification if:
+            # 1. Non-numeric (object/bool) with reasonable cardinality, OR
+            # 2. Numeric but with very low cardinality (likely categorical integers like 0/1, 1/2/3, etc.)
+            is_categorical_string = target_series.dtype in ['object', 'bool'] and target_unique <= 20
+            is_categorical_numeric = (
+                pd.api.types.is_numeric_dtype(target_series) and 
+                target_unique <= 10 and  # Very low cardinality for numeric
+                all(target_series.dropna() == target_series.dropna().astype(int))  # All integers
+            )
+            
+            if is_categorical_string or is_categorical_numeric:
+                task_type = "classification"
+                validation_results["target_analysis"]["task_type"] = "classification"
+                validation_results["target_analysis"]["n_classes"] = target_unique
+                
+                # Check class balance
+                class_counts = target_series.value_counts()
+                min_class_size = class_counts.min()
+                max_class_size = class_counts.max()
+                imbalance_ratio = max_class_size / min_class_size if min_class_size > 0 else float('inf')
+                
+                if imbalance_ratio > 10:
+                    validation_results["warnings"].append(f"Severe class imbalance detected (ratio: {imbalance_ratio:.1f})")
+                    validation_results["suggestions"].append("Consider using class_weight='balanced' or resampling techniques")
+                
+                if min_class_size < 5:
+                    validation_results["warnings"].append(f"Some classes have very few samples (min: {min_class_size})")
+                    validation_results["suggestions"].append("Consider combining rare classes or collecting more data")
+            
+            else:
+                task_type = "regression"
+                validation_results["target_analysis"]["task_type"] = "regression"
+                
+                # Check target distribution
+                target_clean = target_series.dropna()
+                if len(target_clean) > 0:
+                    skewness = target_clean.skew()
+                    if abs(skewness) > 2:
+                        validation_results["warnings"].append(f"Target variable is highly skewed (skew: {skewness:.2f})")
+                        validation_results["suggestions"].append("Consider log transformation for target variable")
         
         # Analyze features
-        feature_cols = [col for col in df.columns if col != target_col]
+        feature_cols = [col for col in df.columns if col != target_col] if target_col else df.columns.tolist()
         
-        if len(feature_cols) == 0:
+        if len(feature_cols) == 0 and task_type != "clustering":
             validation_results["errors"].append("No feature columns available")
             validation_results["is_ready"] = False
             return validation_results
@@ -486,27 +508,49 @@ class DataProfiler:
         
         if n_samples < 100:
             validation_results["warnings"].append(f"Very small dataset ({n_samples} samples)")
-            validation_results["suggestions"].append("Consider cross-validation and simpler models")
+            if task_type == "clustering":
+                validation_results["suggestions"].append("Small datasets work well with hierarchical clustering")
+            else:
+                validation_results["suggestions"].append("Consider cross-validation and simpler models")
         
         if n_features > n_samples:
             validation_results["warnings"].append(f"More features ({n_features}) than samples ({n_samples})")
-            validation_results["suggestions"].append("Feature selection or regularization strongly recommended")
+            if task_type == "clustering":
+                validation_results["suggestions"].append("Consider PCA dimensionality reduction before clustering")
+            else:
+                validation_results["suggestions"].append("Feature selection or regularization strongly recommended")
         
-        # Check for potential data leakage
-        potential_leakage = []
-        for col in feature_cols:
-            # Check for perfect correlation with target (potential leakage)
-            if pd.api.types.is_numeric_dtype(df[col]) and pd.api.types.is_numeric_dtype(target_series):
-                try:
-                    correlation = abs(df[col].corr(target_series))
-                    if correlation > 0.95:
-                        potential_leakage.append(col)
-                except:
-                    pass
+        # Check for potential data leakage (only for supervised learning)
+        if task_type != "clustering" and target_col:
+            potential_leakage = []
+            target_series = df[target_col]
+            for col in feature_cols:
+                # Check for perfect correlation with target (potential leakage)
+                if pd.api.types.is_numeric_dtype(df[col]) and pd.api.types.is_numeric_dtype(target_series):
+                    try:
+                        correlation = abs(df[col].corr(target_series))
+                        if correlation > 0.95:
+                            potential_leakage.append(col)
+                    except:
+                        pass
+            
+            if potential_leakage:
+                validation_results["warnings"].append(f"Potential data leakage in columns: {', '.join(potential_leakage)}")
+                validation_results["suggestions"].append("Investigate high correlations - may indicate data leakage")
         
-        if potential_leakage:
-            validation_results["warnings"].append(f"Potential data leakage in columns: {', '.join(potential_leakage)}")
-            validation_results["suggestions"].append("Investigate high correlations - may indicate data leakage")
+        # Add clustering-specific analysis
+        if task_type == "clustering":
+            # Analyze feature types for clustering
+            numeric_features = df.select_dtypes(include=[np.number]).columns.tolist()
+            categorical_features = df.select_dtypes(include=['object', 'category']).columns.tolist()
+            
+            validation_results["feature_analysis"]["numeric_features"] = len(numeric_features)
+            validation_results["feature_analysis"]["categorical_features"] = len(categorical_features)
+            
+            if len(numeric_features) >= 2:
+                validation_results["suggestions"].append("Good for K-means clustering with numeric features")
+            if len(categorical_features) > 0:
+                validation_results["suggestions"].append("Consider K-modes or mixed-type clustering for categorical data")
         
         validation_results["feature_analysis"]["n_features"] = len(feature_cols)
         validation_results["feature_analysis"]["problematic_count"] = len(problematic_features)

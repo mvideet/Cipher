@@ -74,6 +74,7 @@ class QuerySuggester:
             "shape": {"rows": int(len(df)), "columns": int(len(df.columns))},
             "columns": [],
             "sample_data": {},
+            "sample_rows": [],  # Add actual sample rows for GPT analysis
             "data_types": {},
             "potential_targets": [],
             "domain_indicators": []
@@ -101,29 +102,70 @@ class QuerySuggester:
             
             analysis["columns"].append(col_info)
         
-        # Detect domain indicators based on column names
-        column_names_lower = [col.lower() for col in df.columns]
+        # Add sample rows for GPT to understand actual data patterns
+        sample_size = min(8, len(df))  # Send up to 8 sample rows
+        if sample_size > 0:
+            # Get a representative sample (mix of first and random rows)
+            if len(df) <= 8:
+                sample_df = df.copy()
+            else:
+                # Take first 3 rows + 5 random rows for diversity
+                first_rows = df.head(3)
+                remaining_df = df.iloc[3:]
+                random_rows = remaining_df.sample(n=min(5, len(remaining_df)), random_state=42)
+                sample_df = pd.concat([first_rows, random_rows]).reset_index(drop=True)
+            
+            # Convert to list of dictionaries and clean for JSON serialization
+            sample_rows = []
+            for _, row in sample_df.iterrows():
+                row_dict = {}
+                for col in df.columns:
+                    value = row[col]
+                    # Handle different data types for JSON serialization
+                    if pd.isna(value):
+                        row_dict[col] = None
+                    elif isinstance(value, (np.integer, np.floating)):
+                        row_dict[col] = float(value) if isinstance(value, np.floating) else int(value)
+                    elif isinstance(value, (np.bool_, bool)):
+                        row_dict[col] = bool(value)
+                    else:
+                        row_dict[col] = str(value)
+                sample_rows.append(row_dict)
+            
+            analysis["sample_rows"] = sample_rows[:8]  # Ensure max 8 rows
         
-        # Health/medical
-        if any(keyword in ' '.join(column_names_lower) for keyword in [
-            'age', 'blood', 'pressure', 'heart', 'disease', 'diagnosis', 'symptom', 'patient', 'medical'
+        # Detect domain indicators based on column names (improved logic)
+        column_names_lower = [col.lower() for col in df.columns]
+        column_text = ' '.join(column_names_lower)
+        
+        # Technical/Scientific (check first to avoid false classifications)
+        technical_indicators = ['sensor', 'quantum', 'electromagnetic', 'spectral', 'experiment', 'lab_condition', 'measurement_device', 'frequency', 'amplitude', 'phase', 'neural_activation', 'protein_expression', 'gene_activity', 'molecular', 'chemical', 'optical', 'acoustic', 'vibration']
+        if any(indicator in column_text for indicator in technical_indicators):
+            analysis["domain_indicators"].append("scientific")
+        
+        # Customer/Business
+        elif any(keyword in column_text for keyword in [
+            'customer', 'client', 'user', 'account', 'churn', 'tenure', 'revenue', 'spending', 'purchase', 'order'
         ]):
-            analysis["domain_indicators"].append("healthcare")
+            analysis["domain_indicators"].append("business")
+        
+        # Health/medical (with exclusion for technical contexts)
+        elif any(keyword in column_text for keyword in [
+            'patient', 'age', 'blood', 'pressure', 'heart', 'disease', 'diagnosis', 'symptom', 'treatment', 'medical', 'clinical', 'hospital', 'doctor', 'therapy'
+        ]):
+            # Only classify as medical if no strong technical indicators
+            has_technical = any(indicator in column_text for indicator in ['sensor', 'quantum', 'electromagnetic', 'spectral', 'experiment'])
+            if not has_technical:
+                analysis["domain_indicators"].append("healthcare")
         
         # Finance
-        if any(keyword in ' '.join(column_names_lower) for keyword in [
+        elif any(keyword in column_text for keyword in [
             'price', 'cost', 'revenue', 'profit', 'income', 'salary', 'loan', 'credit', 'financial'
         ]):
             analysis["domain_indicators"].append("finance")
         
-        # Sales/marketing
-        if any(keyword in ' '.join(column_names_lower) for keyword in [
-            'customer', 'sales', 'marketing', 'campaign', 'conversion', 'clicks', 'engagement'
-        ]):
-            analysis["domain_indicators"].append("marketing")
-        
         # HR/employee
-        if any(keyword in ' '.join(column_names_lower) for keyword in [
+        elif any(keyword in column_text for keyword in [
             'employee', 'salary', 'department', 'performance', 'satisfaction', 'attrition', 'turnover'
         ]):
             analysis["domain_indicators"].append("hr")
@@ -148,6 +190,19 @@ class QuerySuggester:
         
         potential_targets = dataset_analysis.get("potential_targets", [])
         domain_indicators = dataset_analysis.get("domain_indicators", [])
+        sample_rows = dataset_analysis.get("sample_rows", [])
+        
+        # Format sample data for GPT analysis
+        sample_data_text = ""
+        if sample_rows:
+            sample_data_text = f"""
+Sample Data (first {len(sample_rows)} rows):
+"""
+            for i, row in enumerate(sample_rows[:5], 1):  # Show max 5 rows in prompt
+                row_text = ", ".join([f"{k}: {v}" for k, v in list(row.items())[:10]])  # First 10 cols
+                if len(row) > 10:
+                    row_text += ", ..."
+                sample_data_text += f"Row {i}: {row_text}\n"
         
         prompt = f"""You are an AI assistant helping users get started with machine learning on their dataset. 
 
@@ -159,13 +214,25 @@ Dataset Summary:
 Columns:
 {chr(10).join(columns_summary)}
 
-Generate {max_suggestions} diverse, actionable machine learning query suggestions that a user could ask about this dataset. Each suggestion should:
+{sample_data_text}
+
+Based on the actual data patterns you can see above, generate {max_suggestions} diverse, actionable machine learning query suggestions that a user could ask about this dataset. 
+
+ANALYZE THE SAMPLE DATA to understand:
+- What domain this data actually represents (healthcare, finance, scientific, etc.)
+- What types of predictions would be meaningful
+- What clustering approaches would provide business value
+- Which columns contain the most predictive information
+
+Each suggestion should:
 1. Be a complete, natural question/request
-2. Specify what to predict (target variable)
-3. Be appropriate for the data type and domain
+2. Specify what to predict (target variable) 
+3. Be appropriate for the ACTUAL data patterns you observe
 4. Be ready to use as-is in a prompt
 
-Focus on the most obvious and useful ML tasks for this data. Include different types of tasks (classification, regression, clustering if appropriate).
+Focus on the most obvious and useful ML tasks for this SPECIFIC data. Include different types of tasks (classification, regression, clustering if appropriate).
+
+For clustering tasks, analyze the actual data characteristics and suggest specific, meaningful clustering use cases based on what you observe in the sample data. Consider what business insights could be gained from grouping similar records.
 
 Return your response as a JSON array of objects with this format:
 [
@@ -177,7 +244,7 @@ Return your response as a JSON array of objects with this format:
   }}
 ]
 
-Be concise but specific. Make the queries sound natural and actionable."""
+Be concise but specific. Make the queries sound natural and actionable based on what you actually see in the data."""
 
         try:
             response = await self.client.chat.completions.create(
@@ -268,6 +335,12 @@ Be concise but specific. Make the queries sound natural and actionable."""
                 "description": description
             })
         
+        # Add intelligent clustering suggestions based on data
+        if len(df) >= 10:  # Need enough data for clustering
+            clustering_suggestion = self._generate_clustering_suggestion(df)
+            if clustering_suggestion:
+                suggestions.append(clustering_suggestion)
+        
         # Add a general exploration suggestion
         if columns:
             suggestions.append({
@@ -277,4 +350,116 @@ Be concise but specific. Make the queries sound natural and actionable."""
                 "description": "General data exploration and pattern discovery"
             })
         
-        return suggestions[:5]  # Return max 5 suggestions 
+        return suggestions[:5]  # Return max 5 suggestions
+    
+    def _generate_clustering_suggestion(self, df: pd.DataFrame) -> Optional[Dict[str, Any]]:
+        """Generate intelligent clustering suggestion based on data characteristics"""
+        
+        # Analyze data characteristics
+        columns = df.columns.tolist()
+        column_names_lower = [col.lower() for col in columns]
+        
+        # Detect domain and purpose
+        domain_info = self._detect_clustering_domain(column_names_lower, df)
+        
+        if domain_info:
+            return {
+                "query": domain_info["query"],
+                "type": "clustering", 
+                "target": "",
+                "description": domain_info["description"]
+            }
+        
+        # Fallback generic clustering suggestion
+        return {
+            "query": f"Discover natural groups and patterns in this {len(df)} record dataset",
+            "type": "clustering",
+            "target": "",
+            "description": "Use unsupervised learning to find hidden patterns and segment data into meaningful groups"
+        }
+    
+    def _detect_clustering_domain(self, column_names_lower: List[str], df: pd.DataFrame) -> Optional[Dict[str, str]]:
+        """Detect domain-specific clustering opportunities"""
+        
+        # Technical/Scientific/Research data (check first to avoid false medical classification)
+        technical_indicators = ['sensor', 'quantum', 'electromagnetic', 'spectral', 'experiment', 'lab_condition', 'measurement_device', 'frequency', 'amplitude', 'phase', 'neural_activation', 'protein_expression', 'gene_activity', 'molecular', 'chemical', 'optical', 'acoustic', 'vibration']
+        if any(indicator in ' '.join(column_names_lower) for indicator in technical_indicators):
+            return {
+                "query": f"Identify distinct experimental conditions and measurement patterns to understand underlying scientific phenomena",
+                "description": "Scientific clustering for experiment classification, pattern discovery, and research optimization"
+            }
+
+        # Customer/Business data
+        customer_indicators = ['customer', 'client', 'user', 'account', 'churn', 'tenure', 'revenue', 'spending', 'purchase', 'order']
+        if any(indicator in ' '.join(column_names_lower) for indicator in customer_indicators):
+            return {
+                "query": f"Segment customers by behavior patterns, spending habits, and service usage to identify distinct customer groups",
+                "description": "Customer segmentation for targeted marketing, retention strategies, and personalized service offerings"
+            }
+        
+        # Healthcare/Medical data (be more specific to avoid false positives)
+        health_indicators = ['patient', 'age', 'blood', 'pressure', 'heart', 'disease', 'diagnosis', 'symptom', 'treatment', 'medical', 'clinical', 'hospital', 'doctor', 'therapy']
+        
+        # Exclude technical/research contexts that might have medical-sounding terms
+        technical_indicators = ['sensor', 'quantum', 'electromagnetic', 'spectral', 'experiment', 'lab_condition', 'measurement_device', 'frequency', 'amplitude', 'phase']
+        column_text = ' '.join(column_names_lower)
+        
+        # Only classify as medical if it has medical indicators AND doesn't have strong technical indicators
+        has_medical = any(indicator in column_text for indicator in health_indicators)
+        has_technical = any(indicator in column_text for indicator in technical_indicators)
+        
+        if has_medical and not has_technical:
+            return {
+                "query": f"Group patients by symptom profiles, risk factors, and health characteristics to identify patient subpopulations",
+                "description": "Patient stratification for personalized treatment plans and clinical decision support"
+            }
+        
+        # Financial data
+        finance_indicators = ['price', 'cost', 'income', 'salary', 'loan', 'credit', 'balance', 'transaction', 'payment', 'financial']
+        if any(indicator in ' '.join(column_names_lower) for indicator in finance_indicators):
+            return {
+                "query": f"Identify distinct financial profiles and spending patterns to understand different financial behaviors",
+                "description": "Financial segmentation for risk assessment, product recommendations, and investment strategies"
+            }
+        
+        # Employee/HR data
+        hr_indicators = ['employee', 'salary', 'department', 'performance', 'satisfaction', 'attrition', 'turnover', 'position', 'role']
+        if any(indicator in ' '.join(column_names_lower) for indicator in hr_indicators):
+            return {
+                "query": f"Analyze employee profiles and performance patterns to identify distinct workforce segments",
+                "description": "Employee segmentation for talent management, retention strategies, and organizational development"
+            }
+        
+        # Product/Item data
+        product_indicators = ['product', 'item', 'category', 'brand', 'rating', 'review', 'sales', 'inventory', 'sku']
+        if any(indicator in ' '.join(column_names_lower) for indicator in product_indicators):
+            return {
+                "query": f"Group products by characteristics and performance metrics to identify product categories and market segments",
+                "description": "Product segmentation for inventory management, pricing strategies, and market positioning"
+            }
+        
+        # Geographic/Location data
+        geo_indicators = ['location', 'city', 'state', 'country', 'region', 'address', 'latitude', 'longitude', 'zip', 'postal']
+        if any(indicator in ' '.join(column_names_lower) for indicator in geo_indicators):
+            return {
+                "query": f"Discover geographic patterns and regional clusters to understand spatial relationships and local trends",
+                "description": "Geographic segmentation for location-based services, market expansion, and regional analysis"
+            }
+        
+        # Sensor/IoT data
+        sensor_indicators = ['sensor', 'temperature', 'humidity', 'pressure', 'voltage', 'current', 'reading', 'measurement']
+        if any(indicator in ' '.join(column_names_lower) for indicator in sensor_indicators):
+            return {
+                "query": f"Identify distinct operational patterns and anomalous behaviors in sensor readings and system metrics",
+                "description": "Operational clustering for predictive maintenance, system optimization, and anomaly detection"
+            }
+        
+        # Web/Digital data
+        web_indicators = ['click', 'page', 'session', 'visit', 'bounce', 'conversion', 'engagement', 'traffic', 'user_id']
+        if any(indicator in ' '.join(column_names_lower) for indicator in web_indicators):
+            return {
+                "query": f"Segment users by digital behavior patterns, engagement levels, and interaction preferences",
+                "description": "User behavior segmentation for UX optimization, content personalization, and conversion improvement"
+            }
+        
+        return None 

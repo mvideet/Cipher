@@ -705,15 +705,47 @@ class EnhancedTrainingOrchestrator:
             elif model_type == "svm":
                 return SVC(**safe_config, probability=True) if task_type == "classification" else SVR(**safe_config)
             elif model_type == "logistic_regression":
-                return LogisticRegression(**safe_config) if task_type == "classification" else LinearRegression()
+                if task_type == "classification":
+                    # Add robust defaults for better convergence
+                    lr_defaults = {
+                        'max_iter': 2000, 
+                        'solver': 'saga',  # More robust solver
+                        'tol': 1e-4
+                    }
+                    lr_config = {**lr_defaults, **safe_config}
+                    return LogisticRegression(**lr_config)
+                else:
+                    return LinearRegression()
             elif model_type == "linear_regression":
                 # LinearRegression doesn't accept random_state, filter it out
                 lr_config = {k: v for k, v in safe_config.items() if k != 'random_state'}
                 return LinearRegression(**lr_config)
             elif model_type == "ridge":
-                return LogisticRegression(**safe_config) if task_type == "classification" else Ridge(**safe_config)
+                if task_type == "classification":
+                    # Use LogisticRegression with L2 penalty for classification
+                    lr_defaults = {
+                        'max_iter': 2000, 
+                        'solver': 'saga', 
+                        'penalty': 'l2',
+                        'tol': 1e-4
+                    }
+                    lr_config = {**lr_defaults, **safe_config}
+                    return LogisticRegression(**lr_config)
+                else:
+                    return Ridge(**safe_config)
             elif model_type == "lasso":
-                return LogisticRegression(**safe_config) if task_type == "classification" else Lasso(**safe_config)
+                if task_type == "classification":
+                    # Use LogisticRegression with L1 penalty for classification  
+                    lr_defaults = {
+                        'max_iter': 2000, 
+                        'solver': 'saga',  # saga supports L1 
+                        'penalty': 'l1',
+                        'tol': 1e-4
+                    }
+                    lr_config = {**lr_defaults, **safe_config}
+                    return LogisticRegression(**lr_config)
+                else:
+                    return Lasso(**safe_config)
             elif model_type == "knn":
                 return KNeighborsClassifier(**safe_config) if task_type == "classification" else KNeighborsRegressor(**safe_config)
             elif model_type == "naive_bayes":

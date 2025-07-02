@@ -141,13 +141,11 @@ The application automatically:
 - Performs feature selection if requested
 - Uses cross-validation for small datasets (<500 rows)
 
-### Model Families (Not all of them are functional as of now)
+### Model Families
 
-- **Tree-Based Models**: XGBoost, LightGBM, Random Forest
-- **Instance-Based Models**: SVM (linear, RBF, polynomial), K-Nearest Neighbors (KNN)
-- **Linear Models**: Logistic Regression, Linear Regression, Ridge, Lasso
-- **Neural Networks**: Multi-Layer Perceptron (MLP)
-- **Probabilistic Models**: Naive Bayes
+1. **Baseline**: Logistic/Linear Regression with basic hyperparameters
+2. **LightGBM**: Gradient boosting with extensive hyperparameter search
+3. **MLP**: Neural networks with architecture and learning rate optimization
 
 ## Development
 

@@ -621,6 +621,39 @@ async def get_model_recommendations(
                 "clarifications": parsed_intent.clarifications_needed
             }
         
+        # Handle clustering tasks
+        if parsed_intent.task == "clustering":
+            from ..ml.clustering_trainer import ClusteringTrainer
+            
+            # Send initial response
+            response_data = {
+                "status": "clustering_started", 
+                "run_id": run_id,
+                "session_id": session_id,
+                "parsed_intent": {
+                    "task": parsed_intent.task,
+                    "target": parsed_intent.target,
+                    "metric": parsed_intent.metric
+                },
+                "data_profile": {
+                    "n_rows": data_profile.n_rows,
+                    "n_cols": data_profile.n_cols,
+                    "issues": data_profile.issues
+                }
+            }
+            
+            # Start clustering in background
+            logger.info("Starting clustering pipeline", run_id=run_id, session_id=session_id)
+            asyncio.create_task(
+                _run_clustering_pipeline(
+                    run_id, session_id, file_path,
+                    parsed_intent.constraints or {},
+                    websocket_manager
+                )
+            )
+            
+            return response_data
+        
         # Get LLM model recommendations
         if enhanced.lower() == 'true':
             from ..ml.model_selector import ModelSelector
@@ -773,6 +806,45 @@ async def start_training_with_selection(request: dict):
     except Exception as e:
         logger.error("Training with selection failed", error=str(e), traceback=traceback.format_exc())
         raise HTTPException(status_code=500, detail=f"Training failed: {str(e)}")
+
+
+async def _run_clustering_pipeline(
+    run_id: str,
+    session_id: str,
+    dataset_path: str,
+    constraints: Dict[str, Any],
+    websocket_manager_instance
+):
+    """Run clustering pipeline"""
+    try:
+        logger.info("🔍 Starting clustering pipeline", 
+                   run_id=run_id, 
+                   session_id=session_id)
+        
+        from ..ml.clustering_trainer import ClusteringTrainer
+        trainer = ClusteringTrainer(run_id, session_id, websocket_manager_instance)
+        
+        # Default clustering algorithms if none specified
+        selected_algorithms = constraints.get("selected_algorithms", ["kmeans", "dbscan", "hierarchical"])
+        
+        result = await trainer.train_clustering_models(
+            dataset_path=dataset_path,
+            constraints=constraints,
+            selected_algorithms=selected_algorithms
+        )
+        
+        logger.info("✅ Clustering completed successfully", 
+                   run_id=run_id,
+                   algorithm=result.algorithm,
+                   silhouette_score=f"{result.silhouette_score:.4f}",
+                   n_clusters=result.n_clusters)
+        
+    except Exception as e:
+        logger.error("❌ Clustering pipeline failed", 
+                    run_id=run_id, 
+                    session_id=session_id,
+                    error=str(e))
+        await websocket_manager_instance.broadcast_error(session_id, f"Clustering failed: {str(e)}")
 
 
 async def _run_enhanced_training_with_selection(
