@@ -143,9 +143,11 @@ The application automatically:
 
 ### Model Families
 
-1. **Baseline**: Logistic/Linear Regression with basic hyperparameters
-2. **LightGBM**: Gradient boosting with extensive hyperparameter search
-3. **MLP**: Neural networks with architecture and learning rate optimization
+- **Tree-Based Models**: XGBoost, LightGBM, Random Forest
+- **Instance-Based Models**: SVM (linear, RBF, polynomial), K-Nearest Neighbors (KNN)
+- **Linear Models**: Logistic Regression, Linear Regression, Ridge, Lasso
+- **Neural Networks**: Multi-Layer Perceptron (MLP)
+- **Probabilistic Models**: Naive Bayes
 
 ## Development
 
