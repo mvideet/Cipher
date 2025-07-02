@@ -234,6 +234,11 @@ For issues and questions:
 ### Ensemble Training
 - Implemented ensemble training strategies such as voting and stacking to enhance model performance. This process involves creating an ensemble from trained models, leveraging their strengths for better predictions.
 
+### Enhanced Model Training
+- Utilizes ensemble strategies such as Voting and Stacking to improve model performance.
+- Guided by the `ModelSelector` for recommending optimal models and strategies based on data characteristics.
+- Supports a variety of model types, including neural networks, tailored to the specific task requirements.
+
 ---
 
 **Note**: This application requires an OpenAI API key for optimal functionality. Without it, prompt parsing will be limited to basic pattern matching. 
