@@ -16,10 +16,13 @@ class ConnectionManager:
     def __init__(self):
         self.active_connections: Dict[str, WebSocket] = {}
         self._cleanup_task = None
-        self._start_cleanup_task()
     
     async def connect(self, websocket: WebSocket, session_id: str):
         """Accept WebSocket connection"""
+        # Start cleanup task if not already running
+        if self._cleanup_task is None:
+            self._start_cleanup_task()
+            
         logger.info("🔗 Attempting to accept WebSocket connection", 
                    session_id=session_id,
                    current_connections=len(self.active_connections),

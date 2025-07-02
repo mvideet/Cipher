@@ -5,25 +5,60 @@ class UIManager {
         this.currentTab = 'data';
         this.currentRunId = null;
         this.trainingStartTime = null;
+        this.isEnhancedMode = false;
         this.familyProgress = {};
+        this.enhancedModelProgress = {};
+        this.currentSuggestions = [];
+        this.currentDataProfile = null; // Track current data profile
     }
 
     // Initialize UI
     init() {
+        console.log('🚀 Initializing UI Manager...');
+        
+        // Debug navigation elements
+        this.debugNavigationElements();
+        
         this.setupTabNavigation();
         this.setupFileUpload();
         this.setupEventListeners();
         this.setupCopyButtons();
+        
+        console.log('✅ UI Manager initialized successfully');
+    }
+    
+    // Debug navigation elements to ensure they exist and are visible
+    debugNavigationElements() {
+        console.log('🔍 Debugging navigation elements...');
+        
+        const tabNavigation = document.querySelector('.tab-navigation');
+        const navTabs = document.querySelectorAll('.nav-tab');
+        const sessionStatus = document.getElementById('sessionStatus');
+        const progressContainer = document.querySelector('.progress-container');
+        
+        console.log('Tab navigation element:', tabNavigation);
+        console.log('Navigation tabs found:', navTabs.length);
+        console.log('Session status element:', sessionStatus);
+        console.log('Progress container element:', progressContainer);
+        
+        // Ensure navigation is visible
+        if (tabNavigation) {
+            tabNavigation.style.display = 'block';
+            tabNavigation.style.visibility = 'visible';
+            console.log('✅ Navigation is visible');
+        } else {
+            console.error('❌ Tab navigation element not found in DOM!');
+        }
     }
 
     // Setup tab navigation
     setupTabNavigation() {
-        const navItems = document.querySelectorAll('.nav-item');
+        const navTabs = document.querySelectorAll('.nav-tab');
         const tabContents = document.querySelectorAll('.tab-content');
 
-        navItems.forEach(item => {
-            item.addEventListener('click', () => {
-                const tabName = item.dataset.tab;
+        navTabs.forEach(tab => {
+            tab.addEventListener('click', () => {
+                const tabName = tab.dataset.tab;
                 this.switchTab(tabName);
             });
         });
@@ -31,19 +66,30 @@ class UIManager {
 
     // Switch between tabs
     switchTab(tabName) {
-        // Update navigation
-        document.querySelectorAll('.nav-item').forEach(item => {
-            item.classList.remove('active');
+        // Update current tab
+        this.currentTab = tabName;
+        
+        // Update nav tabs
+        document.querySelectorAll('.nav-tab').forEach(tab => {
+            tab.classList.remove('active');
+            if (tab.dataset.tab === tabName) {
+                tab.classList.add('active');
+            }
         });
-        document.querySelector(`[data-tab="${tabName}"]`).classList.add('active');
-
-        // Update content
+        
+        // Update tab content
         document.querySelectorAll('.tab-content').forEach(content => {
             content.classList.remove('active');
         });
         document.getElementById(`${tabName}Tab`).classList.add('active');
-
-        this.currentTab = tabName;
+        
+        // Refresh data profile when switching to training tab
+        if (tabName === 'training') {
+            // Small delay to ensure DOM is updated, then refresh data profile
+            setTimeout(async () => {
+                await this.refreshDataProfile();
+            }, 100);
+        }
     }
 
     // Setup file upload functionality
@@ -119,6 +165,9 @@ class UIManager {
             console.error('Failed to preview file:', error);
             this.showNotification('error', 'Preview Error', 'Failed to preview file content');
         }
+
+        // Generate query suggestions
+        await this.generateQuerySuggestions(file);
 
         // Enable start button if prompt is also filled
         this.updateStartButtonState();
@@ -375,9 +424,67 @@ class UIManager {
 
     // Update data profile
     updateDataProfile(profile) {
-        document.getElementById('dataRows').textContent = profile.n_rows.toLocaleString();
-        document.getElementById('dataColumns').textContent = profile.n_cols;
-        document.getElementById('dataIssues').textContent = profile.issues.length;
+        console.log('🔍 Updating data profile:', profile);
+        
+        // Defensive checks for profile data
+        if (!profile) {
+            console.warn('⚠️ No data profile provided');
+            return;
+        }
+
+        // Store the profile for future use
+        this.currentDataProfile = profile;
+
+        // Update rows with proper fallback and validation
+        const rows = profile.n_rows || profile.rows || 0;
+        const rowsElement = document.getElementById('dataRows');
+        if (rowsElement) {
+            // Handle different data types for rows
+            let displayRows = 'Unknown';
+            if (typeof rows === 'number' && rows > 0) {
+                displayRows = rows.toLocaleString();
+            } else if (typeof rows === 'string' && rows !== '0') {
+                displayRows = rows;
+            }
+            rowsElement.textContent = displayRows;
+            console.log('📊 Updated dataRows element:', displayRows);
+        } else {
+            console.warn('⚠️ dataRows element not found in DOM');
+        }
+
+        // Update columns with proper fallback and validation
+        const cols = profile.n_cols || profile.columns || profile.cols || 0;
+        const colsElement = document.getElementById('dataColumns');
+        if (colsElement) {
+            // Handle different data types for columns
+            let displayCols = 'Unknown';
+            if (typeof cols === 'number' && cols > 0) {
+                displayCols = cols.toString();
+            } else if (typeof cols === 'string' && cols !== '0') {
+                displayCols = cols;
+            }
+            colsElement.textContent = displayCols;
+            console.log('📊 Updated dataColumns element:', displayCols);
+        } else {
+            console.warn('⚠️ dataColumns element not found in DOM');
+        }
+
+        // Update issues with proper fallback and validation
+        const issues = profile.issues || [];
+        const issuesElement = document.getElementById('dataIssues');
+        if (issuesElement) {
+            const issueCount = Array.isArray(issues) ? issues.length : 0;
+            issuesElement.textContent = issueCount.toString();
+            console.log('📊 Updated dataIssues element:', issueCount);
+        } else {
+            console.warn('⚠️ dataIssues element not found in DOM');
+        }
+        
+        console.log('✅ Data profile updated successfully:', { 
+            rows: typeof rows === 'number' ? rows : rows, 
+            cols: typeof cols === 'number' ? cols : cols, 
+            issues: Array.isArray(issues) ? issues.length : 0 
+        });
     }
 
     // Initialize family progress
@@ -385,7 +492,16 @@ class UIManager {
         const families = ['baseline', 'lightgbm', 'mlp'];
         const container = document.getElementById('familyProgress');
         
+        if (!container) {
+            console.error('❌ Family progress container not found');
+            return;
+        }
+        
+        console.log('🔄 Initializing family progress for:', families);
         container.innerHTML = '';
+        
+        // Reset family progress tracking
+        this.familyProgress = {};
         
         families.forEach(family => {
             this.familyProgress[family] = {
@@ -397,6 +513,8 @@ class UIManager {
             const card = this.createFamilyCard(family);
             container.appendChild(card);
         });
+        
+        console.log('✅ Family progress initialized');
     }
 
     // Create family progress card
@@ -405,9 +523,11 @@ class UIManager {
         card.className = 'family-card';
         card.id = `family-${family}`;
         
+        const displayName = family.charAt(0).toUpperCase() + family.slice(1);
+        
         card.innerHTML = `
             <h4>
-                ${family.charAt(0).toUpperCase() + family.slice(1)}
+                ${displayName}
                 <span class="family-status pending">Pending</span>
             </h4>
             <div class="family-details">
@@ -422,6 +542,7 @@ class UIManager {
             </div>
         `;
         
+        console.log(`📊 Created family card for: ${family}`);
         return card;
     }
 
@@ -941,8 +1062,18 @@ class UIManager {
     // Initialize enhanced family progress
     initializeEnhancedFamilyProgress() {
         const container = document.getElementById('familyProgress');
-        container.innerHTML = '<div class="enhanced-progress-placeholder"><i class="fas fa-brain"></i><p>Waiting for AI model recommendations...</p></div>';
-        this.familyProgress = {};
+        if (!container) {
+            console.error('❌ Enhanced family progress container not found');
+            return;
+        }
+        
+        console.log('🔄 Initializing enhanced family progress');
+        container.innerHTML = '<div id="enhancedModelProgress" class="enhanced-model-grid"></div>';
+        
+        // Reset enhanced family progress tracking
+        this.enhancedModelProgress = {};
+        
+        console.log('✅ Enhanced family progress initialized');
     }
 
     // Show enhanced features notification
@@ -957,27 +1088,8 @@ class UIManager {
 
         const container = document.getElementById('familyProgress');
         
-        // Update with actual model recommendations
-        container.innerHTML = `
-            <div class="ensemble-strategy">
-                <h4><i class="fas fa-brain"></i> AI-Selected Ensemble Strategy</h4>
-                <div class="strategy-info">
-                    <div class="strategy-item">
-                        <span class="label">Method:</span>
-                        <span class="value">${data.strategy}</span>
-                    </div>
-                    <div class="strategy-item">
-                        <span class="label">Selected Models:</span>
-                        <span class="value">${data.models.join(', ')}</span>
-                    </div>
-                </div>
-                <div class="strategy-reasoning">
-                    <h5>AI Reasoning:</h5>
-                    <p>${data.reasoning}</p>
-                </div>
-            </div>
-            <div id="enhancedModelProgress" class="enhanced-model-grid"></div>
-        `;
+        // Update with actual model recommendations - just show the cards
+        container.innerHTML = '<div id="enhancedModelProgress" class="enhanced-model-grid"></div>';
 
         this.addTrainingLog({
             family: 'AI-Advisor',
@@ -1011,13 +1123,7 @@ class UIManager {
         if (!container) {
             const familyProgress = document.getElementById('familyProgress');
             if (familyProgress && this.isEnhancedMode) {
-                familyProgress.innerHTML = `
-                    <div class="ensemble-strategy">
-                        <h4><i class="fas fa-brain"></i> Enhanced Training Progress</h4>
-                        <p>Multiple model architectures are being trained and optimized.</p>
-                    </div>
-                    <div id="enhancedModelProgress" class="enhanced-model-grid"></div>
-                `;
+                familyProgress.innerHTML = '<div id="enhancedModelProgress" class="enhanced-model-grid"></div>';
                 container = document.getElementById('enhancedModelProgress');
             }
         }
@@ -1335,11 +1441,58 @@ class UIManager {
             this.currentRunId = run_id;
             this.hideLoading();
             
+            // Ensure we have a valid data profile - try multiple fallback sources
+            let dataProfile = null;
+            
+            // Priority 1: Use data profile from API response
+            if (result.data_profile && (result.data_profile.n_rows || result.data_profile.rows)) {
+                dataProfile = result.data_profile;
+                console.log('📊 Using data profile from API response:', dataProfile);
+            }
+            // Priority 2: Use stored current data profile
+            else if (this.currentDataProfile && (this.currentDataProfile.n_rows || this.currentDataProfile.rows)) {
+                dataProfile = this.currentDataProfile;
+                console.log('📊 Using stored data profile:', dataProfile);
+            }
+            // Priority 3: Try to get data from file input element
+            else {
+                const fileInput = document.getElementById('fileInput');
+                if (fileInput && fileInput.files && fileInput.files[0]) {
+                    try {
+                        const text = await this.readFileAsText(fileInput.files[0]);
+                        const preview = parseCSVPreview(text);
+                        if (preview) {
+                            dataProfile = {
+                                n_rows: preview.totalRows,
+                                n_cols: preview.totalColumns,
+                                issues: []
+                            };
+                            console.log('📊 Generated data profile from file:', dataProfile);
+                        }
+                    } catch (error) {
+                        console.warn('⚠️ Failed to generate data profile from file:', error);
+                    }
+                }
+            }
+            
+            // Final fallback: provide placeholder values
+            if (!dataProfile) {
+                dataProfile = {
+                    n_rows: 'Loading...',
+                    n_cols: 'Loading...',
+                    issues: []
+                };
+                console.log('📊 Using fallback data profile');
+            }
+            
+            // Store the final data profile
+            this.currentDataProfile = dataProfile;
+            
             // Switch to training view
             this.handleTrainingStarted({
                 ...result,
                 parsed_intent,
-                data_profile: { n_rows: 0, n_cols: 0, issues: [] } // Will be updated via websocket
+                data_profile: dataProfile
             }, true);
             
             this.showNotification('success', 'Training Started', 
@@ -1359,6 +1512,278 @@ class UIManager {
             dialog.remove();
         }
     }
+
+    // Generate and display query suggestions
+    async generateQuerySuggestions(file) {
+        try {
+            console.log('🤖 Generating intelligent query suggestions...');
+            
+            // Show loading indicator for suggestions
+            this.showSuggestionsLoading();
+            
+            // Generate suggestions using AI
+            const result = await apiClient.generateQuerySuggestions(file, 5);
+            
+            console.log('✅ Generated suggestions:', result.suggestions);
+            
+            // Store dataset info for later use - be more defensive about data extraction
+            if (result.dataset_info) {
+                // Extract data profile information from multiple possible sources
+                const shape = result.dataset_info.shape || {};
+                const rows = shape.rows || shape.n_rows || result.dataset_info.rows || result.dataset_info.n_rows || 0;
+                const columns = shape.columns || shape.cols || shape.n_cols || result.dataset_info.columns || result.dataset_info.cols || result.dataset_info.n_cols || 0;
+                
+                this.currentDataProfile = {
+                    n_rows: rows,
+                    n_cols: columns,
+                    issues: result.dataset_info.issues || [] // Will be populated during training
+                };
+                console.log('📊 Stored comprehensive data profile from dataset analysis:', this.currentDataProfile);
+            } else {
+                console.warn('⚠️ No dataset_info received from API, attempting local analysis...');
+                
+                // Fallback: try to analyze the file locally
+                try {
+                    const text = await this.readFileAsText(file);
+                    const preview = parseCSVPreview(text);
+                    if (preview) {
+                        this.currentDataProfile = {
+                            n_rows: preview.totalRows,
+                            n_cols: preview.totalColumns,
+                            issues: []
+                        };
+                        console.log('📊 Generated fallback data profile from local analysis:', this.currentDataProfile);
+                    }
+                } catch (error) {
+                    console.warn('⚠️ Failed to generate fallback data profile:', error);
+                }
+            }
+            
+            // Display suggestions
+            this.displayQuerySuggestions(result.suggestions, result.dataset_info);
+            
+        } catch (error) {
+            console.error('Failed to generate suggestions:', error);
+            this.hideSuggestionsLoading();
+            
+            // Even if suggestions fail, try to analyze the file for data profile
+            try {
+                console.log('📂 Analyzing file locally after suggestion failure...');
+                const text = await this.readFileAsText(file);
+                const preview = parseCSVPreview(text);
+                if (preview) {
+                    this.currentDataProfile = {
+                        n_rows: preview.totalRows,
+                        n_cols: preview.totalColumns,
+                        issues: []
+                    };
+                    console.log('📊 Stored data profile after suggestion failure:', this.currentDataProfile);
+                }
+            } catch (analysisError) {
+                console.warn('⚠️ Failed to analyze file after suggestion failure:', analysisError);
+            }
+            
+            // Show fallback suggestions or hide section
+            this.showFallbackSuggestions();
+        }
+    }
+
+    // Show loading state for suggestions
+    showSuggestionsLoading() {
+        const suggestionsContainer = document.getElementById('querySuggestions');
+        if (suggestionsContainer) {
+            suggestionsContainer.style.display = 'block';
+            suggestionsContainer.innerHTML = `
+                <div class="suggestions-header">
+                    <h3><i class="fas fa-lightbulb"></i> Suggested Queries</h3>
+                    <p class="suggestions-subtitle">AI is analyzing your data to suggest relevant ML tasks...</p>
+                </div>
+                <div class="suggestions-loading">
+                    <div class="loading-spinner"></div>
+                    <span>Generating intelligent suggestions...</span>
+                </div>
+            `;
+        }
+    }
+
+    // Hide suggestions loading
+    hideSuggestionsLoading() {
+        const suggestionsContainer = document.getElementById('querySuggestions');
+        if (suggestionsContainer) {
+            suggestionsContainer.style.display = 'none';
+        }
+    }
+
+    // Display query suggestions
+    displayQuerySuggestions(suggestions, datasetInfo) {
+        const suggestionsContainer = document.getElementById('querySuggestions');
+        if (!suggestionsContainer || !suggestions || suggestions.length === 0) {
+            this.hideSuggestionsLoading();
+            return;
+        }
+
+        const suggestionsHTML = suggestions.map((suggestion, index) => `
+            <div class="suggestion-card" data-suggestion='${JSON.stringify(suggestion)}'>
+                <div class="suggestion-header">
+                    <span class="suggestion-type ${suggestion.type}">${suggestion.type}</span>
+                    ${suggestion.target ? `<span class="suggestion-target">Target: ${suggestion.target}</span>` : ''}
+                </div>
+                <div class="suggestion-query">${suggestion.query}</div>
+                <div class="suggestion-description">${suggestion.description}</div>
+                <button class="suggestion-btn" onclick="uiManager.useSuggestion(${index})">
+                    <i class="fas fa-magic"></i>
+                    Use This Query
+                </button>
+            </div>
+        `).join('');
+
+        suggestionsContainer.innerHTML = `
+            <div class="suggestions-header">
+                <h3><i class="fas fa-lightbulb"></i> Suggested Queries</h3>
+                <p class="suggestions-subtitle">
+                    Based on your ${datasetInfo?.shape?.rows || 'data'} rows × ${datasetInfo?.shape?.columns || 'N'} columns dataset, 
+                    here are some intelligent ML tasks to get you started:
+                </p>
+            </div>
+            <div class="suggestions-grid">
+                ${suggestionsHTML}
+            </div>
+            <div class="suggestions-footer">
+                <small><i class="fas fa-info-circle"></i> Click any suggestion to use it as your query, or write your own below.</small>
+            </div>
+        `;
+
+        suggestionsContainer.style.display = 'block';
+        
+        // Store suggestions for use
+        this.currentSuggestions = suggestions;
+        
+        console.log('📋 Displayed query suggestions successfully');
+    }
+
+    // Use a suggestion (populate prompt input)
+    useSuggestion(index) {
+        if (!this.currentSuggestions || !this.currentSuggestions[index]) {
+            console.error('Invalid suggestion index:', index);
+            return;
+        }
+
+        const suggestion = this.currentSuggestions[index];
+        const promptInput = document.getElementById('promptInput');
+        
+        // Populate the prompt input with the suggestion
+        promptInput.value = suggestion.query;
+        
+        // Trigger input event to update UI state
+        promptInput.dispatchEvent(new Event('input'));
+        
+        // Add visual feedback
+        this.showNotification('success', 'Query Selected', `Using: "${suggestion.query.substring(0, 50)}${suggestion.query.length > 50 ? '...' : ''}"`);
+        
+        // Highlight the selected suggestion temporarily
+        const suggestionCards = document.querySelectorAll('.suggestion-card');
+        suggestionCards.forEach(card => card.classList.remove('selected'));
+        suggestionCards[index]?.classList.add('selected');
+        
+        // Focus on the prompt input
+        promptInput.focus();
+        
+        console.log('✨ Used suggestion:', suggestion.query);
+    }
+
+    // Show fallback suggestions when AI fails
+    showFallbackSuggestions() {
+        const suggestionsContainer = document.getElementById('querySuggestions');
+        if (!suggestionsContainer) return;
+
+        const fallbackSuggestions = [
+            {
+                query: "Predict the target variable using all available features",
+                type: "classification",
+                target: "target",
+                description: "General classification or regression task"
+            },
+            {
+                query: "Find patterns and relationships in this dataset",
+                type: "exploration",
+                target: "",
+                description: "Exploratory data analysis and pattern discovery"
+            }
+        ];
+
+        this.displayQuerySuggestions(fallbackSuggestions, { shape: { rows: 'N', columns: 'N' } });
+    }
+
+    // Refresh data profile if needed
+    async refreshDataProfile() {
+        // Try to use stored profile first
+        if (this.currentDataProfile && (this.currentDataProfile.n_rows || this.currentDataProfile.rows)) {
+            console.log('🔄 Refreshing data profile display with stored data');
+            this.updateDataProfile(this.currentDataProfile);
+            return;
+        }
+        
+        console.warn('⚠️ No stored data profile available, attempting to reconstruct...');
+        
+        // Try to get data from file input element
+        const fileInput = document.getElementById('fileInput');
+        if (fileInput && fileInput.files && fileInput.files[0]) {
+            try {
+                console.log('📂 Reconstructing data profile from uploaded file...');
+                const text = await this.readFileAsText(fileInput.files[0]);
+                const preview = parseCSVPreview(text);
+                if (preview) {
+                    const reconstructedProfile = {
+                        n_rows: preview.totalRows,
+                        n_cols: preview.totalColumns,
+                        issues: []
+                    };
+                    console.log('✅ Successfully reconstructed data profile:', reconstructedProfile);
+                    this.currentDataProfile = reconstructedProfile;
+                    this.updateDataProfile(reconstructedProfile);
+                    return;
+                }
+            } catch (error) {
+                console.warn('⚠️ Failed to reconstruct data profile from file:', error);
+            }
+        }
+        
+        // Try to get data from preview table if available
+        const previewTable = document.querySelector('#previewTable .preview-stats');
+        if (previewTable) {
+            try {
+                console.log('📊 Reconstructing data profile from preview table...');
+                const statsText = previewTable.textContent;
+                const rowsMatch = statsText.match(/Rows:\s*(\d+)/);
+                const colsMatch = statsText.match(/Columns:\s*(\d+)/);
+                
+                if (rowsMatch && colsMatch) {
+                    const reconstructedProfile = {
+                        n_rows: parseInt(rowsMatch[1]),
+                        n_cols: parseInt(colsMatch[1]),
+                        issues: []
+                    };
+                    console.log('✅ Successfully reconstructed data profile from preview:', reconstructedProfile);
+                    this.currentDataProfile = reconstructedProfile;
+                    this.updateDataProfile(reconstructedProfile);
+                    return;
+                }
+            } catch (error) {
+                console.warn('⚠️ Failed to reconstruct data profile from preview:', error);
+            }
+        }
+        
+        // Final fallback: use placeholder values
+        console.log('📋 Using placeholder data profile values');
+        const placeholderProfile = {
+            n_rows: 'Unknown',
+            n_cols: 'Unknown', 
+            issues: []
+        };
+        this.updateDataProfile(placeholderProfile);
+    }
+
+
 }
 
 // Create global UI manager instance

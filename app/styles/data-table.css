@@ -1,193 +1,353 @@
-/* Data table styles for AutoML Desktop */
+/* ========================================
+   Data Table Styles - AutoML Studio Pro
+   ======================================== */
 
+/* Data Preview Statistics */
 .preview-stats {
     display: flex;
-    gap: 24px;
-    margin-bottom: 16px;
-    padding: 12px 16px;
-    background: #f8fafc;
-    border-radius: 6px;
-    font-size: 14px;
+    flex-wrap: wrap;
+    gap: var(--space-lg, 1.5rem);
+    margin-bottom: var(--space-lg, 1.5rem);
+    padding: var(--space-lg, 1.5rem);
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: var(--radius-xl, 1rem);
+    backdrop-filter: blur(20px);
+    font-size: 0.875rem;
 }
 
-.preview-stats span {
-    color: #64748b;
+.preview-stats .stat-group {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-xs, 0.25rem);
 }
 
-.preview-stats strong {
-    color: #1e293b;
+.preview-stats .stat-label {
+    color: var(--gray-400, #9ca3af);
+    font-size: 0.75rem;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
 }
 
+.preview-stats .stat-value {
+    color: white;
+    font-weight: 600;
+    font-family: var(--font-mono, 'JetBrains Mono', monospace);
+}
+
+/* Table Container */
 .table-wrapper {
-    overflow-x: auto;
-    border: 1px solid #e2e8f0;
-    border-radius: 8px;
-    max-height: 400px;
-    overflow-y: auto;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: var(--radius-xl, 1rem);
+    overflow: hidden;
+    backdrop-filter: blur(20px);
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+    max-height: 500px;
+    position: relative;
 }
 
+.table-wrapper::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 1px;
+    background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.2), transparent);
+}
+
+/* Data Table */
 .data-table {
     width: 100%;
     border-collapse: collapse;
-    font-size: 14px;
-    background: white;
+    font-size: 0.875rem;
+    background: transparent;
+    color: white;
 }
 
 .data-table th,
 .data-table td {
-    padding: 12px 16px;
+    padding: var(--space-md, 1rem) var(--space-lg, 1.5rem);
     text-align: left;
-    border-bottom: 1px solid #f1f5f9;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
     max-width: 200px;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+    transition: all 0.2s ease;
 }
 
 .data-table th {
-    background: #f8fafc;
+    background: rgba(255, 255, 255, 0.1);
     font-weight: 600;
-    color: #374151;
+    color: white;
     position: sticky;
     top: 0;
-    z-index: 1;
-    border-bottom: 2px solid #e5e7eb;
+    z-index: 10;
+    border-bottom: 2px solid rgba(255, 255, 255, 0.2);
+    backdrop-filter: blur(20px);
+    text-transform: uppercase;
+    font-size: 0.75rem;
+    letter-spacing: 0.05em;
+}
+
+.data-table th::after {
+    content: '';
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 1px;
+    background: linear-gradient(90deg, transparent, rgba(59, 130, 246, 0.5), transparent);
+}
+
+.data-table tbody tr {
+    transition: all 0.2s ease;
+    position: relative;
 }
 
 .data-table tbody tr:hover {
-    background: #f9fafb;
+    background: rgba(255, 255, 255, 0.05);
+    transform: translateY(-1px);
+}
+
+.data-table tbody tr:hover td {
+    color: rgba(255, 255, 255, 0.9);
 }
 
 .data-table td {
-    color: #6b7280;
+    color: rgba(255, 255, 255, 0.8);
+    font-weight: 400;
 }
 
-/* Family progress details */
+/* Numeric columns styling */
+.data-table td[data-type="number"] {
+    font-family: var(--font-mono, 'JetBrains Mono', monospace);
+    text-align: right;
+    color: rgba(99, 102, 241, 0.9);
+}
+
+/* Family Progress Details */
 .family-details {
     display: flex;
     flex-direction: column;
-    gap: 8px;
+    gap: var(--space-sm, 0.5rem);
+    padding: var(--space-lg, 1.5rem);
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: var(--radius-lg, 0.75rem);
+    backdrop-filter: blur(20px);
 }
 
 .family-stat {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    font-size: 14px;
+    font-size: 0.875rem;
+    padding: var(--space-sm, 0.5rem) 0;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.family-stat:last-child {
+    border-bottom: none;
 }
 
 .family-stat .label {
-    color: #64748b;
+    color: rgba(255, 255, 255, 0.7);
     font-weight: 500;
 }
 
 .family-stat .value {
-    color: #1e293b;
+    color: white;
     font-weight: 600;
+    font-family: var(--font-mono, 'JetBrains Mono', monospace);
 }
 
-/* Backend error styles */
+/* Family Cards */
+.family-card {
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: var(--radius-xl, 1rem);
+    padding: var(--space-lg, 1.5rem);
+    backdrop-filter: blur(20px);
+    transition: all 0.3s ease;
+    position: relative;
+    overflow: hidden;
+}
+
+.family-card::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 3px;
+    background: linear-gradient(90deg, 
+        rgba(59, 130, 246, 0.8), 
+        rgba(139, 92, 246, 0.8), 
+        rgba(236, 72, 153, 0.8)
+    );
+    transform: translateX(-100%);
+    transition: transform 0.5s ease;
+}
+
+.family-card:hover::before {
+    transform: translateX(0);
+}
+
+.family-card:hover {
+    background: rgba(255, 255, 255, 0.1);
+    border-color: rgba(255, 255, 255, 0.2);
+    transform: translateY(-4px);
+    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.2);
+}
+
+.family-card h4 {
+    color: white;
+    font-weight: 600;
+    margin-bottom: var(--space-md, 1rem);
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm, 0.5rem);
+}
+
+.family-card h4 i {
+    color: rgba(59, 130, 246, 0.8);
+}
+
+.family-status {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-xs, 0.25rem);
+    padding: var(--space-xs, 0.25rem) var(--space-sm, 0.5rem);
+    border-radius: var(--radius-full, 9999px);
+    font-size: 0.75rem;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin-bottom: var(--space-md, 1rem);
+}
+
+.family-status.running {
+    background: rgba(59, 130, 246, 0.2);
+    border: 1px solid rgba(59, 130, 246, 0.3);
+    color: rgba(59, 130, 246, 1);
+}
+
+.family-status.completed {
+    background: rgba(16, 185, 129, 0.2);
+    border: 1px solid rgba(16, 185, 129, 0.3);
+    color: rgba(16, 185, 129, 1);
+}
+
+.family-status.failed {
+    background: rgba(239, 68, 68, 0.2);
+    border: 1px solid rgba(239, 68, 68, 0.3);
+    color: rgba(239, 68, 68, 1);
+}
+
+.family-status.pending {
+    background: rgba(156, 163, 175, 0.2);
+    border: 1px solid rgba(156, 163, 175, 0.3);
+    color: rgba(156, 163, 175, 1);
+}
+
+/* Backend Error Styles */
 .backend-error {
     max-width: 600px;
-    margin: 64px auto;
-    padding: 32px;
-    background: white;
-    border-radius: 12px;
-    border: 1px solid #e2e8f0;
+    margin: var(--space-3xl, 4rem) auto;
+    padding: var(--space-2xl, 3rem);
+    background: rgba(255, 255, 255, 0.1);
+    border: 1px solid rgba(239, 68, 68, 0.3);
+    border-radius: var(--radius-2xl, 1.5rem);
+    backdrop-filter: blur(20px);
     text-align: center;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
 }
 
 .backend-error h2 {
-    color: #dc2626;
-    margin-bottom: 16px;
+    color: rgba(239, 68, 68, 1);
+    margin-bottom: var(--space-lg, 1.5rem);
+    font-size: 1.5rem;
+    font-weight: 700;
 }
 
 .backend-error p {
-    color: #64748b;
-    margin-bottom: 24px;
+    color: rgba(255, 255, 255, 0.8);
+    margin-bottom: var(--space-xl, 2rem);
+    line-height: 1.6;
 }
 
 .error-details {
-    background: #fef2f2;
-    border: 1px solid #fecaca;
-    border-radius: 6px;
-    padding: 16px;
-    margin-bottom: 24px;
+    background: rgba(239, 68, 68, 0.1);
+    border: 1px solid rgba(239, 68, 68, 0.2);
+    border-radius: var(--radius-lg, 0.75rem);
+    padding: var(--space-lg, 1.5rem);
+    margin-bottom: var(--space-xl, 2rem);
     text-align: left;
+    backdrop-filter: blur(10px);
 }
 
 .error-details strong {
-    color: #dc2626;
+    color: rgba(239, 68, 68, 1);
+    font-weight: 600;
 }
 
 .error-actions {
-    margin-bottom: 32px;
+    margin-bottom: var(--space-2xl, 3rem);
 }
 
 .error-help {
     text-align: left;
-    background: #f8fafc;
-    padding: 20px;
-    border-radius: 8px;
-    border-left: 4px solid #3b82f6;
+    background: rgba(59, 130, 246, 0.05);
+    border: 1px solid rgba(59, 130, 246, 0.2);
+    border-left: 4px solid rgba(59, 130, 246, 0.8);
+    border-radius: var(--radius-lg, 0.75rem);
+    padding: var(--space-xl, 2rem);
+    backdrop-filter: blur(10px);
 }
 
 .error-help h3 {
-    color: #1e293b;
-    margin-bottom: 12px;
+    color: white;
+    margin-bottom: var(--space-md, 1rem);
+    font-weight: 600;
 }
 
 .error-help ul {
-    color: #64748b;
-    margin-left: 20px;
+    color: rgba(255, 255, 255, 0.8);
+    margin-left: var(--space-xl, 2rem);
+    line-height: 1.6;
 }
 
 .error-help li {
-    margin-bottom: 8px;
-}
-
-/* Additional responsive styles */
-@media (max-width: 768px) {
-    .data-table th,
-    .data-table td {
-        padding: 8px 12px;
-        font-size: 13px;
-        max-width: 120px;
-    }
-    
-    .preview-stats {
-        flex-direction: column;
-        gap: 8px;
-        font-size: 13px;
-    }
-    
-    .backend-error {
-        margin: 32px 16px;
-        padding: 24px;
-    }
-    
-    .error-help {
-        padding: 16px;
-    }
+    margin-bottom: var(--space-sm, 0.5rem);
 }
 
 /* Loading spinner for family cards */
 .family-card.loading {
     opacity: 0.7;
+    position: relative;
 }
 
 .family-card.loading::after {
     content: '';
     position: absolute;
     top: 50%;
-    right: 16px;
-    width: 16px;
-    height: 16px;
-    border: 2px solid #e2e8f0;
-    border-top: 2px solid #3b82f6;
+    right: var(--space-lg, 1.5rem);
+    width: 20px;
+    height: 20px;
+    border: 2px solid rgba(255, 255, 255, 0.2);
+    border-top: 2px solid rgba(59, 130, 246, 1);
     border-radius: 50%;
     animation: spin 1s linear infinite;
     transform: translateY(-50%);
+}
+
+@keyframes spin {
+    0% { transform: translateY(-50%) rotate(0deg); }
+    100% { transform: translateY(-50%) rotate(360deg); }
 }
 
 /* Enhanced notification styles */
@@ -203,7 +363,7 @@
     left: 0;
     right: 0;
     height: 3px;
-    background: linear-gradient(90deg, transparent, rgba(59, 130, 246, 0.3), transparent);
+    background: linear-gradient(90deg, transparent, rgba(59, 130, 246, 0.5), transparent);
     animation: progress 5s linear forwards;
 }
 
@@ -225,11 +385,12 @@
 /* Progress bar enhancements */
 .progress-bar {
     position: relative;
-    background: linear-gradient(90deg, #f1f5f9, #e2e8f0);
+    background: rgba(255, 255, 255, 0.1);
+    border: 1px solid rgba(255, 255, 255, 0.1);
 }
 
 .progress-fill {
-    background: linear-gradient(90deg, #3b82f6, #1d4ed8);
+    background: linear-gradient(90deg, rgba(59, 130, 246, 1), rgba(29, 78, 216, 1));
     position: relative;
     overflow: hidden;
 }
@@ -252,8 +413,14 @@
 
 /* Enhanced file upload area */
 .upload-area.processing {
-    border-color: #3b82f6;
-    background: #f0f9ff;
+    border-color: rgba(59, 130, 246, 1);
+    background: rgba(59, 130, 246, 0.1);
+    animation: processing-pulse 2s ease-in-out infinite;
+}
+
+@keyframes processing-pulse {
+    0%, 100% { background: rgba(59, 130, 246, 0.1); }
+    50% { background: rgba(59, 130, 246, 0.2); }
 }
 
 .upload-area.processing .upload-content {
@@ -266,30 +433,118 @@
     top: 50%;
     left: 50%;
     transform: translate(-50%, -50%);
-    color: #3b82f6;
+    color: rgba(59, 130, 246, 1);
     font-weight: 600;
+    font-size: 1rem;
 }
 
-/* Scrollbar styling */
+/* Custom scrollbar styling */
 .logs-container::-webkit-scrollbar,
 .table-wrapper::-webkit-scrollbar {
-    width: 6px;
-    height: 6px;
+    width: 8px;
+    height: 8px;
 }
 
 .logs-container::-webkit-scrollbar-track,
 .table-wrapper::-webkit-scrollbar-track {
-    background: #f1f5f9;
-    border-radius: 3px;
+    background: rgba(255, 255, 255, 0.05);
+    border-radius: var(--radius-md, 0.5rem);
 }
 
 .logs-container::-webkit-scrollbar-thumb,
 .table-wrapper::-webkit-scrollbar-thumb {
-    background: #cbd5e1;
-    border-radius: 3px;
+    background: rgba(255, 255, 255, 0.2);
+    border-radius: var(--radius-md, 0.5rem);
+    border: 2px solid transparent;
+    background-clip: content-box;
 }
 
 .logs-container::-webkit-scrollbar-thumb:hover,
 .table-wrapper::-webkit-scrollbar-thumb:hover {
-    background: #94a3b8;
+    background: rgba(255, 255, 255, 0.3);
+    background-clip: content-box;
+}
+
+/* Firefox scrollbar */
+.logs-container,
+.table-wrapper {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(255, 255, 255, 0.2) rgba(255, 255, 255, 0.05);
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+    .data-table th,
+    .data-table td {
+        padding: var(--space-sm, 0.5rem) var(--space-md, 1rem);
+        font-size: 0.8125rem;
+        max-width: 120px;
+    }
+    
+    .preview-stats {
+        flex-direction: column;
+        gap: var(--space-sm, 0.5rem);
+        font-size: 0.8125rem;
+    }
+    
+    .backend-error {
+        margin: var(--space-xl, 2rem) var(--space-lg, 1.5rem);
+        padding: var(--space-xl, 2rem);
+    }
+    
+    .error-help {
+        padding: var(--space-lg, 1.5rem);
+    }
+    
+    .family-card {
+        padding: var(--space-md, 1rem);
+    }
+    
+    .table-wrapper {
+        max-height: 400px;
+    }
+}
+
+@media (max-width: 480px) {
+    .data-table th,
+    .data-table td {
+        padding: var(--space-xs, 0.25rem) var(--space-sm, 0.5rem);
+        font-size: 0.75rem;
+        max-width: 100px;
+    }
+    
+    .preview-stats {
+        padding: var(--space-md, 1rem);
+    }
+    
+    .table-wrapper {
+        max-height: 300px;
+    }
+    
+    .family-card h4 {
+        font-size: 0.9375rem;
+    }
+}
+
+/* Dark mode compatibility */
+@media (prefers-color-scheme: dark) {
+    .data-table td[data-type="number"] {
+        color: rgba(147, 197, 253, 0.9);
+    }
+}
+
+/* High contrast mode */
+@media (prefers-contrast: high) {
+    .data-table th {
+        background: rgba(255, 255, 255, 0.2);
+        color: white;
+    }
+    
+    .data-table tbody tr:hover {
+        background: rgba(255, 255, 255, 0.1);
+    }
+    
+    .family-card {
+        border-color: rgba(255, 255, 255, 0.3);
+    }
 } 

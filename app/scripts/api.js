@@ -477,39 +477,65 @@ class APIClient {
         console.log('✅ WebSocket disconnected and cleaned up');
     }
 
-    // Get model recommendations from AI
-    async getModelRecommendations(file, prompt, enhanced = false) {
+    // Get model recommendations (for enhanced mode)
+    async getModelRecommendations(file, prompt, enhanced) {
         const formData = new FormData();
         formData.append('file', file);
         formData.append('prompt', prompt);
-        formData.append('enhanced', enhanced.toString());
+        formData.append('enhanced', enhanced);
         formData.append('session_id', this.sessionId);
 
-        const response = await fetch(`${this.baseURL}/api/get-model-recommendations`, {
+        const response = await fetch(`${this.baseURL}/get-model-recommendations`, {
             method: 'POST',
             body: formData
         });
 
         if (!response.ok) {
-            let errorMessage;
-            try {
-                const errorData = await response.json();
-                errorMessage = errorData.detail || errorData.message || errorData.error;
-            } catch (e) {
-                errorMessage = `HTTP ${response.status}: ${response.statusText}`;
-            }
-            const error = new Error(errorMessage || `HTTP ${response.status}: ${response.statusText}`);
-            error.status = response.status;
-            error.statusText = response.statusText;
-            throw error;
+            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
         }
 
-        return response.json();
+        return await response.json();
+    }
+
+    // Generate query suggestions based on uploaded dataset
+    async generateQuerySuggestions(file, maxSuggestions = 5) {
+        const formData = new FormData();
+        formData.append('file', file);
+        formData.append('max_suggestions', maxSuggestions);
+
+        const response = await fetch(`${this.baseURL}/generate-query-suggestions`, {
+            method: 'POST',
+            body: formData
+        });
+
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+
+        return await response.json();
+    }
+
+    // Analyze dataset with optional suggestions
+    async analyzeDataset(file, includeSuggestions = true) {
+        const formData = new FormData();
+        formData.append('file', file);
+        formData.append('include_suggestions', includeSuggestions);
+
+        const response = await fetch(`${this.baseURL}/analyze-dataset`, {
+            method: 'POST',
+            body: formData
+        });
+
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+
+        return await response.json();
     }
 
     // Start training with user-selected models
     async startTrainingWithSelection(selectionData) {
-        const response = await fetch(`${this.baseURL}/api/start-training-with-selection`, {
+        const response = await fetch(`${this.baseURL}/start-training-with-selection`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'

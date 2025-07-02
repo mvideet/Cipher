@@ -137,12 +137,15 @@ class EnhancedTrainingOrchestrator:
         
         # Data validation and splitting
         test_size = min(0.2, max(0.1, 10 / len(y)))
-        stratify_param = y if task_type == "classification" and len(np.unique(y)) > 1 else None
+        
+        # Convert y to numpy array for stratification to avoid DataFrame column selection issues
+        y_array = np.array(y) if hasattr(y, 'values') else y
+        stratify_param = y_array if task_type == "classification" and len(np.unique(y_array)) > 1 else None
         
         # Debug logging for data validation
         logger.info("🔍 Data validation", 
                    target_unique=np.unique(y).tolist(),
-                   target_distribution=pd.Series(y).value_counts().to_dict(),
+                   target_distribution=dict(zip(*np.unique(y, return_counts=True))),
                    feature_count=X.shape[1],
                    sample_count=len(y))
         
@@ -150,12 +153,22 @@ class EnhancedTrainingOrchestrator:
             X, y, test_size=test_size, random_state=42, stratify=stratify_param
         )
         
+        # Ensure data types are preserved as pandas DataFrames/Series
+        if not isinstance(X_train, pd.DataFrame):
+            X_train = pd.DataFrame(X_train, columns=X.columns)
+        if not isinstance(X_val, pd.DataFrame):
+            X_val = pd.DataFrame(X_val, columns=X.columns)
+        if not isinstance(y_train, pd.Series):
+            y_train = pd.Series(y_train, name=y.name if hasattr(y, 'name') else 'target')
+        if not isinstance(y_val, pd.Series):
+            y_val = pd.Series(y_val, name=y.name if hasattr(y, 'name') else 'target')
+        
         logger.info("📊 Data prepared", 
                    train_size=len(X_train), 
                    val_size=len(X_val),
                    features=X.shape[1],
-                   train_target_dist=pd.Series(y_train).value_counts().to_dict(),
-                   val_target_dist=pd.Series(y_val).value_counts().to_dict())
+                   train_target_dist=dict(zip(*np.unique(y_train, return_counts=True))),
+                   val_target_dist=dict(zip(*np.unique(y_val, return_counts=True))))
         
         # Configure Optuna logging to reduce noise
         optuna.logging.set_verbosity(optuna.logging.WARNING)
@@ -200,11 +213,11 @@ class EnhancedTrainingOrchestrator:
                         task_type, metric, constraints
                     )
                     
-            trained_models.append(result)
+                    trained_models.append(result)
                     completed_count += 1
-            
+                    
                     # Send progress update
-            await self._send_training_status_update("model_completed", {
+                    await self._send_training_status_update("model_completed", {
                         "message": f"Model {completed_count}/{total_architectures} completed",
                         "completed": completed_count,
                         "total": total_architectures,
@@ -451,7 +464,7 @@ class EnhancedTrainingOrchestrator:
         # Continue with normal sklearn model training
         
         # Create preprocessing pipeline for sklearn models
-        preprocessor = self._create_preprocessor(X_train, constraints)
+        preprocessor = self._create_preprocessor(X_train, constraints, task_type)
         
         # Create and configure model
         model = self._create_model_instance(
@@ -672,8 +685,8 @@ class EnhancedTrainingOrchestrator:
         invalid_params = {'key_params', 'model_type', 'name', 'complexity', 'description'}
         safe_config = {k: v for k, v in config.items() if k not in invalid_params and v is not None}
         
-        # Add random state for reproducibility
-        if 'random_state' not in safe_config and model_type not in ['naive_bayes', 'knn']:
+        # Add random state for reproducibility (exclude deterministic models)
+        if 'random_state' not in safe_config and model_type not in ['naive_bayes', 'knn', 'linear_regression']:
             safe_config['random_state'] = 42
         
         try:
@@ -694,7 +707,9 @@ class EnhancedTrainingOrchestrator:
             elif model_type == "logistic_regression":
                 return LogisticRegression(**safe_config) if task_type == "classification" else LinearRegression()
             elif model_type == "linear_regression":
-                return LinearRegression(**safe_config)
+                # LinearRegression doesn't accept random_state, filter it out
+                lr_config = {k: v for k, v in safe_config.items() if k != 'random_state'}
+                return LinearRegression(**lr_config)
             elif model_type == "ridge":
                 return LogisticRegression(**safe_config) if task_type == "classification" else Ridge(**safe_config)
             elif model_type == "lasso":
@@ -760,10 +775,27 @@ class EnhancedTrainingOrchestrator:
         
         return X, y
     
-    def _create_preprocessor(self, X: pd.DataFrame, constraints: Dict[str, Any]):
+    def _create_preprocessor(self, X: pd.DataFrame, constraints: Dict[str, Any], task_type: str = "classification"):
         """Create preprocessing pipeline - reuse from original trainer"""
-        numeric_features = X.select_dtypes(include=[np.number]).columns.tolist()
-        categorical_features = X.select_dtypes(include=['object', 'category']).columns.tolist()
+        # Get column indices instead of names to avoid DataFrame column selection issues
+        numeric_features = []
+        categorical_features = []
+        
+        for i, col in enumerate(X.columns):
+            if X[col].dtype in ['int64', 'int32', 'float64', 'float32']:
+                numeric_features.append(i)
+            else:
+                categorical_features.append(i)
+        
+        # Also create backup with column names for logging
+        numeric_feature_names = X.select_dtypes(include=[np.number]).columns.tolist()
+        categorical_feature_names = X.select_dtypes(include=['object', 'category']).columns.tolist()
+        
+        logger.debug("Creating preprocessor", 
+                    numeric_features=len(numeric_features), 
+                    categorical_features=len(categorical_features),
+                    numeric_names=numeric_feature_names,
+                    categorical_names=categorical_feature_names)
         
         numeric_transformer = Pipeline(steps=[
             ('imputer', SimpleImputer(strategy='median')),
@@ -775,25 +807,35 @@ class EnhancedTrainingOrchestrator:
             ('onehot', OneHotEncoder(handle_unknown='ignore', sparse_output=False))
         ])
         
-        preprocessor = ColumnTransformer(
-            transformers=[
-                ('num', numeric_transformer, numeric_features),
-                ('cat', categorical_transformer, categorical_features)
-            ])
+        # Use column indices instead of names
+        transformers = []
+        if numeric_features:
+            transformers.append(('num', numeric_transformer, numeric_features))
+        if categorical_features:
+            transformers.append(('cat', categorical_transformer, categorical_features))
+        
+        if not transformers:
+            # If no features, create a passthrough transformer
+            preprocessor = Pipeline([('passthrough', StandardScaler())])
+        else:
+            preprocessor = ColumnTransformer(transformers=transformers)
         
         # Add feature selection if requested
         feature_limit = constraints.get("feature_limit")
-        if feature_limit:
+        if feature_limit and transformers:
             estimated_features = len(numeric_features)
-            for cat_col in categorical_features:
-                estimated_features += min(X[cat_col].nunique(), 20)
+            for cat_col_idx in categorical_features:
+                cat_col_name = X.columns[cat_col_idx]
+                estimated_features += min(X[cat_col_name].nunique(), 20)
             
-            actual_limit = min(feature_limit, estimated_features, len(X.columns) - 1)
+            actual_limit = min(feature_limit, estimated_features, len(X.columns))
             
-            if actual_limit > 0:
+            if actual_limit > 0 and actual_limit < estimated_features:
+                # Choose appropriate score function based on task type
+                score_func = f_classif if task_type == "classification" else f_regression
                 preprocessor = Pipeline([
                     ("transform", preprocessor),
-                    ("select", SelectKBest(score_func=f_classif, k=actual_limit))
+                    ("select", SelectKBest(score_func=score_func, k=actual_limit))
                 ])
         
         return preprocessor

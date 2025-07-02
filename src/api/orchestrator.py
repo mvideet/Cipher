@@ -10,10 +10,12 @@ import uuid
 import traceback
 from datetime import datetime
 from typing import Dict, Any, List
+from pathlib import Path
 
+import pandas as pd
+import numpy as np
 from fastapi import APIRouter, Depends, File, Form, UploadFile, HTTPException
 from sqlmodel import Session, select
-import pandas as pd
 import structlog
 
 from ..core.config import settings
@@ -29,12 +31,30 @@ from ..ml.enhanced_trainer import EnhancedTrainingOrchestrator
 from ..ml.explainer import Explainer
 from ..ml.deployer import Deployer
 from .websocket_manager import websocket_manager
+from ..ml.query_suggester import QuerySuggester
 
 logger = structlog.get_logger()
 router = APIRouter()
 
 # Global storage for training tasks
 training_tasks = {}
+
+
+def convert_numpy_types(obj):
+    """Convert numpy data types to native Python types for JSON serialization"""
+    if isinstance(obj, np.bool_):
+        return bool(obj)
+    elif isinstance(obj, np.integer):
+        return int(obj)
+    elif isinstance(obj, np.floating):
+        return float(obj)
+    elif isinstance(obj, np.ndarray):
+        return obj.tolist()
+    elif isinstance(obj, dict):
+        return {k: convert_numpy_types(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [convert_numpy_types(item) for item in obj]
+    return obj
 
 
 def generate_session_id() -> str:
@@ -542,7 +562,7 @@ async def _run_enhanced_training_pipeline(
         )
 
 
-@router.post("/api/get-model-recommendations")
+@router.post("/get-model-recommendations")
 async def get_model_recommendations(
     file: UploadFile = File(...),
     prompt: str = Form(...),
@@ -708,7 +728,7 @@ async def get_model_recommendations(
         raise HTTPException(status_code=500, detail=f"Model recommendations failed: {str(e)}")
 
 
-@router.post("/api/start-training-with-selection")
+@router.post("/start-training-with-selection")
 async def start_training_with_selection(request: dict):
     """Start training with user-selected models"""
     try:
@@ -876,3 +896,134 @@ async def _run_enhanced_training_with_selection(
         if run_id in training_tasks:
             del training_tasks[run_id]
             logger.info("🧹 Cleaned up training task", run_id=run_id) 
+
+
+@router.post("/generate-query-suggestions")
+async def generate_query_suggestions(
+    file: UploadFile = File(...),
+    max_suggestions: int = 5
+):
+    """Generate intelligent query suggestions based on uploaded dataset"""
+    try:
+        logger.info("Generating query suggestions", 
+                   file_name=file.filename,
+                   max_suggestions=max_suggestions)
+        
+        # Read and save file temporarily
+        file_content = await file.read()
+        settings.TEMP_DIR.mkdir(parents=True, exist_ok=True)
+        temp_file_path = settings.TEMP_DIR / f"temp_suggestions_{file.filename}"
+        
+        with open(temp_file_path, 'wb') as f:
+            f.write(file_content)
+        
+        # Load dataset
+        try:
+            df = pd.read_csv(temp_file_path)
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"Could not read CSV file: {str(e)}")
+        
+        # Validate dataset
+        if df.empty:
+            raise HTTPException(status_code=400, detail="Dataset is empty")
+        
+        if len(df.columns) < 2:
+            raise HTTPException(status_code=400, detail="Dataset must have at least 2 columns")
+        
+        # Generate suggestions
+        suggester = QuerySuggester()
+        suggestions = await suggester.generate_suggestions(df, max_suggestions)
+        
+        # Get basic dataset info
+        dataset_info = {
+            "shape": {"rows": int(len(df)), "columns": int(len(df.columns))},
+            "columns": df.columns.tolist(),
+            "column_types": {str(k): str(v) for k, v in df.dtypes.astype(str).to_dict().items()},
+            "sample_data": df.head(3).to_dict(orient="records"),
+            "has_nulls": bool(df.isnull().any().any()),
+            "memory_usage": int(df.memory_usage(deep=True).sum())
+        }
+        
+        # Cleanup temp file
+        try:
+            os.remove(temp_file_path)
+        except:
+            pass
+        
+        logger.info(f"Generated {len(suggestions)} query suggestions successfully")
+        
+        response = {
+            "status": "success",
+            "suggestions": suggestions,
+            "dataset_info": dataset_info,
+            "message": f"Generated {len(suggestions)} intelligent query suggestions"
+        }
+        
+        return convert_numpy_types(response)
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Query suggestion generation failed", error=str(e))
+        raise HTTPException(status_code=500, detail=f"Failed to generate suggestions: {str(e)}")
+
+
+@router.post("/analyze-dataset")
+async def analyze_dataset(
+    file: UploadFile = File(...),
+    include_suggestions: bool = True
+):
+    """Analyze dataset and optionally include query suggestions"""
+    try:
+        logger.info("Analyzing dataset", 
+                   file_name=file.filename,
+                   include_suggestions=include_suggestions)
+        
+        # Read and save file temporarily
+        file_content = await file.read()
+        settings.TEMP_DIR.mkdir(parents=True, exist_ok=True)
+        temp_file_path = settings.TEMP_DIR / f"temp_analysis_{file.filename}"
+        
+        with open(temp_file_path, 'wb') as f:
+            f.write(file_content)
+        
+        # Load and profile dataset
+        df = pd.read_csv(temp_file_path)
+        profiler = DataProfiler()
+        data_profile = profiler.profile_dataset(df)
+        
+        response = {
+            "status": "success",
+            "dataset_info": {
+                "filename": file.filename,
+                "shape": {"rows": int(len(df)), "columns": int(len(df.columns))},
+                "columns": df.columns.tolist(),
+                "sample_data": df.head(5).to_dict(orient="records"),
+                "column_types": {str(k): str(v) for k, v in df.dtypes.astype(str).to_dict().items()}
+            },
+            "data_profile": {
+                "n_rows": int(data_profile.n_rows),
+                "n_cols": int(data_profile.n_cols),
+                "issues": data_profile.issues
+            }
+        }
+        
+        # Generate suggestions if requested
+        if include_suggestions:
+            suggester = QuerySuggester()
+            suggestions = await suggester.generate_suggestions(df, max_suggestions=5)
+            response["suggestions"] = suggestions
+            response["suggestions_count"] = len(suggestions)
+        
+        # Cleanup temp file
+        try:
+            os.remove(temp_file_path)
+        except:
+            pass
+        
+        logger.info("Dataset analysis completed successfully")
+        return convert_numpy_types(response)
+        
+    except Exception as e:
+        logger.error("Dataset analysis failed", error=str(e))
+        raise HTTPException(status_code=500, detail=f"Dataset analysis failed: {str(e)}") 

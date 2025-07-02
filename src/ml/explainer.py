@@ -13,6 +13,7 @@ import shap
 import structlog
 import openai
 from sklearn.pipeline import Pipeline
+from sklearn.compose import ColumnTransformer
 
 from ..core.config import settings
 
@@ -20,7 +21,7 @@ logger = structlog.get_logger()
 
 
 class Explainer:
-    """SHAP-based model explainer"""
+    """SHAP-based model explainer with robust support for all model types"""
     
     def __init__(self):
         self.client = openai.AsyncOpenAI(api_key=settings.OPENAI_API_KEY) if settings.OPENAI_API_KEY else None
@@ -36,71 +37,73 @@ class Explainer:
         
         logger.info("Generating model explanations", model_path=model_path)
         
-        # Load model and data
-        with open(model_path, 'rb') as f:
-            pipeline = pickle.load(f)
+        try:
+            # Load model and data
+            with open(model_path, 'rb') as f:
+                pipeline = pickle.load(f)
+            
+            df = pd.read_csv(dataset_path)
+            
+            # Prepare features (same as training)
+            X = df.drop(columns=[target_col])
+            y = df[target_col]
+            
+            # Sample data if too large
+            if len(X) > max_samples:
+                sample_idx = np.random.choice(len(X), max_samples, replace=False)
+                X = X.iloc[sample_idx]
+                y = y.iloc[sample_idx]
+            
+            logger.info(f"Explaining model with {len(X)} samples", model_type=type(pipeline).__name__)
+                
+            # Process the model and data for explanation
+            explanation_result = await self._explain_with_fallback(pipeline, X, y, model_path, target_col)
+            
+            return explanation_result
+                
+        except Exception as e:
+            logger.error("Model explanation failed", error=str(e), exc_info=True)
+            # Return fallback explanation
+            return self._create_fallback_explanation(model_path, target_col)
+    
+    async def _explain_with_fallback(self, pipeline, X, y, model_path, target_col):
+        """Try multiple explanation approaches with fallbacks"""
         
-        df = pd.read_csv(dataset_path)
+        # Try SHAP explanation first
+        try:
+            return await self._explain_with_shap(pipeline, X, y, model_path, target_col)
+        except Exception as shap_error:
+            logger.warning("SHAP explanation failed, trying coefficient-based", error=str(shap_error))
+            
+            # Try coefficient-based explanation for linear models
+            try:
+                return await self._explain_with_coefficients(pipeline, X, target_col)
+            except Exception as coef_error:
+                logger.warning("Coefficient explanation failed, using feature importance", error=str(coef_error))
+                
+                # Try built-in feature importance
+                try:
+                    return await self._explain_with_feature_importance(pipeline, X, target_col)
+                except Exception as importance_error:
+                    logger.warning("Feature importance failed, using fallback", error=str(importance_error))
+                    
+                    # Final fallback
+                    return self._create_fallback_explanation(model_path, target_col)
+    
+    async def _explain_with_shap(self, pipeline, X, y, model_path, target_col):
+        """Explain model using SHAP"""
         
-        # Prepare features (same as training)
-        X = df.drop(columns=[target_col])
-        y = df[target_col]
+        # Extract model and preprocess data
+        model, X_processed, feature_names = self._extract_model_and_features(pipeline, X)
         
-        # Sample data if too large
-        if len(X) > max_samples:
-            sample_idx = np.random.choice(len(X), max_samples, replace=False)
-            X = X.iloc[sample_idx]
-            y = y.iloc[sample_idx]
+        logger.info(f"Model type: {type(model).__name__}, Processed data shape: {X_processed.shape}")
         
-        # Get model from pipeline or use direct model
-        if isinstance(pipeline, Pipeline):
-            # This is a proper sklearn Pipeline
-            model = pipeline.named_steps['model']
-            X_processed = pipeline[:-1].transform(X)  # All steps except final model
-        else:
-            # This is a direct model (like ensemble) without pipeline wrapper
-            model = pipeline
-            X_processed = X  # Use raw features for ensemble models
+        # Get appropriate SHAP explainer
+        explainer = self._get_robust_explainer(model, X_processed)
         
-        # For ensemble models, we can't easily explain individual components
-        # so we'll use a kernel explainer
-        if hasattr(model, 'estimators_') or 'Voting' in type(model).__name__ or 'Stacking' in type(model).__name__:
-            logger.info("Detected ensemble model, using simplified explanation")
-            # For ensembles, we'll just do basic feature importance
-            if hasattr(model, 'feature_importances_'):
-                # Some ensembles have feature importance
-                feature_names = X.columns.tolist()
-                feature_importance = dict(zip(feature_names, model.feature_importances_))
-                sorted_importance = dict(sorted(feature_importance.items(), key=lambda x: x[1], reverse=True))
-                return {
-                    "feature_importance": sorted_importance,
-                    "plot_path": None,
-                    "text_explanation": f"This ensemble model uses multiple algorithms. The most important features are: {', '.join(list(sorted_importance.keys())[:5])}.",
-                    "n_samples_explained": len(X)
-                }
-            else:
-                # Fallback for ensembles without feature importance
-                feature_names = X.columns.tolist()
-                return {
-                    "feature_importance": {name: 1.0/len(feature_names) for name in feature_names},
-                    "plot_path": None,
-                    "text_explanation": "This ensemble model combines multiple algorithms. Feature importance analysis is not available for this ensemble type.",
-                    "n_samples_explained": len(X)
-                }
-        
-        # Choose SHAP explainer based on model type
-        explainer = self._get_explainer(model, X_processed)
-        
-        # Calculate SHAP values
-        logger.info("Calculating SHAP values")
-        shap_values = explainer.shap_values(X_processed)
-        
-        # For multi-class classification, use the first class
-        if isinstance(shap_values, list):
-            shap_values = shap_values[0]
-        
-        # Get feature names after preprocessing
-        feature_names = self._get_feature_names(pipeline, X)
+        # Calculate SHAP values with error handling
+        logger.info("Calculating SHAP values...")
+        shap_values = self._calculate_shap_values(explainer, X_processed)
         
         # Calculate feature importance
         feature_importance = self._calculate_feature_importance(shap_values, feature_names)
@@ -118,54 +121,264 @@ class Explainer:
         return {
             "feature_importance": feature_importance,
             "plot_path": plot_path,
-            "text_explanation": text_explanation,
-            "n_samples_explained": len(X)
+            "text_explanation": text_explanation or f"The model's predictions are most influenced by: {', '.join(list(feature_importance.keys())[:5])}.",
+            "n_samples_explained": len(X),
+            "explanation_method": "SHAP"
         }
     
-    def _get_explainer(self, model, X_processed):
-        """Get appropriate SHAP explainer for the model"""
+    def _extract_model_and_features(self, pipeline, X):
+        """Extract the actual model and process features"""
+        
+        if isinstance(pipeline, Pipeline):
+            # Extract the final model from pipeline
+            model = pipeline.named_steps['model']
+            
+            # Process features through pipeline (excluding final model step)
+            preprocessing_steps = Pipeline(pipeline.steps[:-1])
+            X_processed = preprocessing_steps.transform(X) if len(pipeline.steps) > 1 else X.values
+            
+            # Get feature names after preprocessing
+            feature_names = self._get_feature_names_from_pipeline(preprocessing_steps, X)
+            
+        else:
+            # Direct model (ensemble models are often not wrapped in pipelines)
+            model = pipeline
+            
+            # For ensemble models, assume data is already processed
+            if hasattr(X, 'values'):
+                X_processed = X.values
+                feature_names = X.columns.tolist()
+            else:
+                X_processed = X
+                feature_names = [f"feature_{i}" for i in range(X.shape[1])]
+        
+        # Ensure X_processed is numpy array
+        if hasattr(X_processed, 'toarray'):  # Sparse matrix
+            X_processed = X_processed.toarray()
+        elif not isinstance(X_processed, np.ndarray):
+            X_processed = np.array(X_processed)
+        
+        # Ensure feature names match processed data dimensions
+        if len(feature_names) != X_processed.shape[1]:
+            logger.warning(f"Feature name mismatch: {len(feature_names)} names vs {X_processed.shape[1]} features")
+            feature_names = [f"feature_{i}" for i in range(X_processed.shape[1])]
+        
+        return model, X_processed, feature_names
+    
+    def _get_robust_explainer(self, model, X_processed):
+        """Get appropriate SHAP explainer with robust model type detection"""
         
         model_name = type(model).__name__.lower()
+        logger.info(f"Selecting explainer for model: {model_name}")
         
-        # Use TreeExplainer for tree-based models
-        if any(tree_type in model_name for tree_type in ['lgbm', 'lightgbm', 'xgb', 'randomforest', 'decisiontree']):
-            logger.info("Using TreeExplainer")
+        # Tree-based models - use TreeExplainer
+        if any(tree_type in model_name for tree_type in [
+            'lgbm', 'lightgbm', 'xgb', 'xgboost', 'randomforest', 'decisiontree', 
+            'extratrees', 'gradientboosting'
+        ]):
+            logger.info("Using TreeExplainer for tree-based model")
             return shap.TreeExplainer(model)
         
-        # Use LinearExplainer for linear models
-        elif any(linear_type in model_name for linear_type in ['linear', 'logistic']):
-            logger.info("Using LinearExplainer")
+        # Linear models - use LinearExplainer
+        elif any(linear_type in model_name for linear_type in [
+            'linear', 'logistic', 'ridge', 'lasso', 'elasticnet'
+        ]):
+            logger.info("Using LinearExplainer for linear model")
             return shap.LinearExplainer(model, X_processed)
         
-        # Use KernelExplainer for other models (slower)
-        else:
-            logger.info("Using KernelExplainer")
-            # Sample background data for kernel explainer
+        # SVM models - use appropriate explainer based on kernel
+        elif 'svm' in model_name or 'svc' in model_name or 'svr' in model_name:
+            logger.info("Detected SVM model")
+            
+            # Try to determine kernel type
+            kernel = getattr(model, 'kernel', 'rbf')
+            if kernel == 'linear':
+                logger.info("Using LinearExplainer for linear SVM")
+                return shap.LinearExplainer(model, X_processed)
+            else:
+                logger.info(f"Using KernelExplainer for {kernel} SVM")
+                background_size = min(50, len(X_processed))  # Smaller background for SVM
+                background = shap.sample(X_processed, background_size)
+                return shap.KernelExplainer(model.predict, background)
+        
+        # Neural networks
+        elif any(nn_type in model_name for nn_type in [
+            'mlp', 'neural', 'perceptron'
+        ]):
+            logger.info("Using KernelExplainer for neural network")
             background_size = min(100, len(X_processed))
-            background = X_processed[:background_size]
+            background = shap.sample(X_processed, background_size)
+            return shap.KernelExplainer(model.predict, background)
+        
+        # Ensemble models (Voting, Stacking, etc.)
+        elif any(ensemble_type in model_name for ensemble_type in [
+            'voting', 'stacking', 'bagging', 'ada'
+        ]) or hasattr(model, 'estimators_'):
+            logger.info("Using KernelExplainer for ensemble model")
+            background_size = min(100, len(X_processed))
+            background = shap.sample(X_processed, background_size)
+            return shap.KernelExplainer(model.predict, background)
+        
+        # Default: KernelExplainer (slowest but most general)
+        else:
+            logger.info(f"Using KernelExplainer as fallback for {model_name}")
+            background_size = min(100, len(X_processed))
+            background = shap.sample(X_processed, background_size)
             return shap.KernelExplainer(model.predict, background)
     
-    def _get_feature_names(self, pipeline, X_original):
-        """Get feature names after preprocessing"""
+    def _calculate_shap_values(self, explainer, X_processed):
+        """Calculate SHAP values with error handling"""
         
         try:
-            # Check if this is a pipeline with preprocessing steps
-            if isinstance(pipeline, Pipeline):
-                # Try to get feature names from the preprocessor
-                preprocessor = pipeline.named_steps.get('preprocessor') or pipeline.named_steps.get('transform')
-                
-                if preprocessor and hasattr(preprocessor, 'get_feature_names_out'):
-                    return preprocessor.get_feature_names_out().tolist()
-                elif preprocessor and hasattr(preprocessor, 'get_feature_names'):
-                    return preprocessor.get_feature_names().tolist()
+            # Limit sample size for slow explainers
+            if isinstance(explainer, shap.KernelExplainer):
+                sample_size = min(100, len(X_processed))  # Limit for kernel explainer
+                if len(X_processed) > sample_size:
+                    indices = np.random.choice(len(X_processed), sample_size, replace=False)
+                    X_sample = X_processed[indices]
+                    logger.info(f"Using {sample_size} samples for KernelExplainer")
+                else:
+                    X_sample = X_processed
+            else:
+                X_sample = X_processed
+            
+            shap_values = explainer.shap_values(X_sample)
+            
+            # Handle multi-class classification (take first class or handle appropriately)
+            if isinstance(shap_values, list):
+                if len(shap_values) == 2:  # Binary classification
+                    shap_values = shap_values[1]  # Take positive class
+                else:  # Multi-class
+                    shap_values = shap_values[0]  # Take first class
+            
+            logger.info(f"SHAP values calculated successfully, shape: {shap_values.shape}")
+            return shap_values
+            
+        except Exception as e:
+            logger.error(f"SHAP calculation failed: {str(e)}")
+            raise e
+    
+    def _get_feature_names_from_pipeline(self, preprocessing_steps, X_original):
+        """Robust feature name extraction from preprocessing pipeline"""
+        
+        try:
+            # Try different methods to get feature names
+            if hasattr(preprocessing_steps, 'get_feature_names_out'):
+                try:
+                    feature_names = preprocessing_steps.get_feature_names_out()
+                    return [str(name) for name in feature_names]
+                except:
+                    pass
+            
+            if hasattr(preprocessing_steps, 'get_feature_names'):
+                try:
+                    feature_names = preprocessing_steps.get_feature_names()
+                    return [str(name) for name in feature_names]
+                except:
+                    pass
+            
+            # Try to get from the last step
+            if hasattr(preprocessing_steps, 'steps') and preprocessing_steps.steps:
+                last_step = preprocessing_steps.steps[-1][1]
+                if hasattr(last_step, 'get_feature_names_out'):
+                    try:
+                        feature_names = last_step.get_feature_names_out()
+                        return [str(name) for name in feature_names]
+                    except:
+                        pass
+            
+            # Check for ColumnTransformer
+            for step_name, step in preprocessing_steps.steps:
+                if isinstance(step, ColumnTransformer):
+                    try:
+                        feature_names = step.get_feature_names_out()
+                        return [str(name) for name in feature_names]
+                    except:
+                        pass
             
             # Fallback: use original column names
             return X_original.columns.tolist()
             
         except Exception as e:
-            logger.warning("Could not extract feature names", error=str(e))
-            # Generate generic names based on original data shape
+            logger.warning(f"Could not extract feature names: {str(e)}")
             return X_original.columns.tolist() if hasattr(X_original, 'columns') else [f"feature_{i}" for i in range(X_original.shape[1])]
+    
+    async def _explain_with_coefficients(self, pipeline, X, target_col):
+        """Explain using model coefficients for linear models"""
+        
+        model, X_processed, feature_names = self._extract_model_and_features(pipeline, X)
+        
+        # Check if model has coefficients
+        if hasattr(model, 'coef_'):
+            coef = model.coef_
+            if coef.ndim > 1:
+                coef = coef[0]  # Take first class for multi-class
+            
+            # Create feature importance from coefficients
+            feature_importance = {}
+            for i, name in enumerate(feature_names[:len(coef)]):
+                feature_importance[name] = float(abs(coef[i]))
+            
+            # Sort by importance
+            sorted_importance = dict(sorted(
+                feature_importance.items(), 
+                key=lambda x: x[1], 
+                reverse=True
+            ))
+            
+            return {
+                "feature_importance": sorted_importance,
+                "plot_path": None,
+                "text_explanation": f"Linear model coefficients show that {', '.join(list(sorted_importance.keys())[:3])} are the most influential features for predicting {target_col}.",
+                "n_samples_explained": len(X),
+                "explanation_method": "Coefficients"
+            }
+        else:
+            raise ValueError("Model does not have coefficients")
+    
+    async def _explain_with_feature_importance(self, pipeline, X, target_col):
+        """Explain using built-in feature importance"""
+        
+        model, X_processed, feature_names = self._extract_model_and_features(pipeline, X)
+        
+        # Check if model has feature importance
+        if hasattr(model, 'feature_importances_'):
+            importance = model.feature_importances_
+            
+            # Create feature importance dictionary
+            feature_importance = {}
+            for i, name in enumerate(feature_names[:len(importance)]):
+                feature_importance[name] = float(importance[i])
+            
+            # Sort by importance
+            sorted_importance = dict(sorted(
+                feature_importance.items(), 
+                key=lambda x: x[1], 
+                reverse=True
+            ))
+            
+            return {
+                "feature_importance": sorted_importance,
+                "plot_path": None,
+                "text_explanation": f"Tree-based model feature importance shows that {', '.join(list(sorted_importance.keys())[:3])} are the most important features for predicting {target_col}.",
+                "n_samples_explained": len(X),
+                "explanation_method": "Feature Importance"
+            }
+        else:
+            raise ValueError("Model does not have feature_importances_")
+    
+    def _create_fallback_explanation(self, model_path, target_col):
+        """Create a basic fallback explanation when all methods fail"""
+        
+        logger.warning("Using fallback explanation - all explanation methods failed")
+        
+        return {
+            "feature_importance": {"unknown_feature": 1.0},
+            "plot_path": None,
+            "text_explanation": f"Model explanation is not available for this model type. The model was trained to predict {target_col}.",
+            "n_samples_explained": 0,
+            "explanation_method": "Fallback"
+        }
     
     def _calculate_feature_importance(self, shap_values, feature_names):
         """Calculate feature importance from SHAP values"""
@@ -208,6 +421,7 @@ class Explainer:
             plt.yticks(range(len(mean_importance)), top_feature_names[:len(mean_importance)])
             plt.xlabel('Mean |SHAP value|')
             plt.title('Feature Importance (SHAP)')
+            plt.gca().invert_yaxis()  # Most important at top
             plt.tight_layout()
             
             # Save plot

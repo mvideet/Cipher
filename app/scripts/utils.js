@@ -1,8 +1,20 @@
 // Utility functions for AutoML Desktop
 
-// Generate unique session ID
+// Generate unique session ID with fallback
 function generateSessionId() {
-    return 'session_' + Math.random().toString(36).substr(2, 9) + '_' + Date.now();
+    try {
+        const randomPart = Math.random().toString(36).substring(2, 11);
+        const timestampPart = Date.now().toString(36);
+        const sessionId = `session_${randomPart}_${timestampPart}`;
+        console.log('🆔 Generated session ID:', sessionId);
+        return sessionId;
+    } catch (error) {
+        console.error('❌ Error generating session ID:', error);
+        // Fallback method
+        const fallbackId = `session_${Date.now()}_${Math.floor(Math.random() * 10000)}`;
+        console.log('🆔 Using fallback session ID:', fallbackId);
+        return fallbackId;
+    }
 }
 
 // Format file size

@@ -16,51 +16,48 @@
                     <i class="fas fa-robot"></i>
                     <span>AutoML Desktop</span>
                 </div>
-                <div class="header-actions">
-                    <button id="newSessionBtn" class="btn btn-primary">
-                        <i class="fas fa-plus"></i>
-                        New Session
-                    </button>
+                <div class="header-info">
+                    <div class="session-info">
+                        <div id="sessionStatus" class="status-indicator">
+                            <span class="status-dot"></span>
+                            <span class="status-text">Ready</span>
+                        </div>
+                    </div>
+                    <div class="header-actions">
+                        <button id="newSessionBtn" class="btn btn-primary">
+                            <i class="fas fa-plus"></i>
+                            New Session
+                        </button>
+                    </div>
                 </div>
             </div>
         </header>
 
-        <!-- Main Content -->
-        <div class="main-content">
-            <!-- Sidebar -->
-            <aside class="sidebar">
-                <div class="session-info">
-                    <h3>Current Session</h3>
-                    <div id="sessionStatus" class="status-indicator">
-                        <span class="status-dot"></span>
-                        <span class="status-text">Ready</span>
+        <!-- Navigation Tabs -->
+        <nav class="tab-navigation">
+            <div class="nav-container">
+                <div class="nav-tabs">
+                    <div class="nav-tab active" data-tab="data">
+                        <i class="fas fa-table"></i>
+                        <span>Data</span>
+                    </div>
+                    <div class="nav-tab" data-tab="training">
+                        <i class="fas fa-cogs"></i>
+                        <span>Training</span>
+                    </div>
+                    <div class="nav-tab" data-tab="results">
+                        <i class="fas fa-chart-line"></i>
+                        <span>Results</span>
+                    </div>
+                    <div class="nav-tab" data-tab="deployment">
+                        <i class="fas fa-rocket"></i>
+                        <span>Deployment</span>
                     </div>
                 </div>
-
-                <nav class="nav-menu">
-                    <ul>
-                        <li class="nav-item active" data-tab="data">
-                            <i class="fas fa-table"></i>
-                            <span>Data</span>
-                        </li>
-                        <li class="nav-item" data-tab="training">
-                            <i class="fas fa-cogs"></i>
-                            <span>Training</span>
-                        </li>
-                        <li class="nav-item" data-tab="results">
-                            <i class="fas fa-chart-line"></i>
-                            <span>Results</span>
-                        </li>
-                        <li class="nav-item" data-tab="deployment">
-                            <i class="fas fa-rocket"></i>
-                            <span>Deployment</span>
-                        </li>
-                    </ul>
-                </nav>
-
-                <div class="progress-section">
-                    <h4>Training Progress</h4>
-                    <div id="progressContainer" class="progress-container">
+                
+                <!-- Progress section in navigation area -->
+                <div class="nav-progress">
+                    <div class="progress-container">
                         <div class="progress-item">
                             <span>Overall Progress</span>
                             <div class="progress-bar">
@@ -70,8 +67,11 @@
                         </div>
                     </div>
                 </div>
-            </aside>
+            </div>
+        </nav>
 
+        <!-- Main Content -->
+        <div class="main-content">
             <!-- Content Area -->
             <main class="content-area">
                 <!-- Data Tab -->
@@ -118,7 +118,14 @@
                                 rows="4"
                             ></textarea>
                         </div>
-                        
+                    </div>
+
+                    <!-- Query Suggestions Section -->
+                    <div id="querySuggestions" class="query-suggestions" style="display: none;">
+                        <!-- AI-generated suggestions will be displayed here -->
+                    </div>
+
+                    <div class="training-section">
                         <div class="training-mode-selection">
                             <h4>Training Mode</h4>
                             <div class="mode-options">
@@ -167,6 +174,7 @@
                                 <span id="startBtnText">Start ML Pipeline</span>
                             </button>
                         </div>
+                    </div>
                     </div>
 
                     <div id="dataPreview" class="data-preview" style="display: none;">

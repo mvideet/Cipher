@@ -13,7 +13,8 @@ function createWindow() {
     webPreferences: {
       nodeIntegration: true,
       contextIsolation: false,
-      enableRemoteModule: true
+      enableRemoteModule: true,
+      zoomFactor: 1.0
     },
     icon: path.join(__dirname, 'assets', 'icon.png'),
     titleBarStyle: 'default',
@@ -26,12 +27,44 @@ function createWindow() {
   // Show window when ready to prevent visual flash
   mainWindow.once('ready-to-show', () => {
     mainWindow.show();
+    // Reset zoom to default
+    mainWindow.webContents.setZoomLevel(0);
+    
+    // Inject CSS to ensure scrolling works
+    mainWindow.webContents.insertCSS(`
+      .content-area {
+        overflow-y: scroll !important;
+        -webkit-overflow-scrolling: touch !important;
+      }
+      #trainingTab {
+        overflow-y: scroll !important;
+        max-height: calc(100vh - 124px) !important;
+      }
+    `);
   });
 
   // Open DevTools in development
   if (process.env.NODE_ENV === 'development') {
     mainWindow.webContents.openDevTools();
   }
+
+  // Add zoom keyboard shortcuts
+  mainWindow.webContents.on('before-input-event', (event, input) => {
+    if (input.control || input.meta) {
+      if (input.key === '+' || input.key === '=') {
+        event.preventDefault();
+        const currentZoom = mainWindow.webContents.getZoomLevel();
+        mainWindow.webContents.setZoomLevel(currentZoom + 0.5);
+      } else if (input.key === '-') {
+        event.preventDefault();
+        const currentZoom = mainWindow.webContents.getZoomLevel();
+        mainWindow.webContents.setZoomLevel(currentZoom - 0.5);
+      } else if (input.key === '0') {
+        event.preventDefault();
+        mainWindow.webContents.setZoomLevel(0);
+      }
+    }
+  });
 
   // Handle window closed
   mainWindow.on('closed', () => {

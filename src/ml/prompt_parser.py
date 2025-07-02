@@ -9,6 +9,7 @@ from typing import Dict, Any, Optional, List
 import openai
 from pydantic import BaseModel, ValidationError
 import structlog
+import pandas as pd
 
 from ..core.config import settings
 from ..models.schema import PromptRequest, PromptResponse
@@ -317,10 +318,17 @@ User request: {request.prompt}"""
             sample_df = dataset_preview["sample_rows"]
             for col in columns:
                 if col not in spec.constraints.get("exclude_cols", []):
-                    # Simple null check on sample
-                    null_count = sum(1 for row in sample_df if not row.get(col))
-                    if null_count > len(sample_df) * 0.8:
-                        issues.append(f"Column '{col}' has high null values")
+                    # Proper null check - only count actual None/NaN/empty string values
+                    null_count = 0
+                    for row in sample_df:
+                        value = row.get(col)
+                        # Check for actual missing values (None, NaN, empty string)
+                        if value is None or value == "" or (isinstance(value, float) and pd.isna(value)):
+                            null_count += 1
+                    
+                    null_fraction = null_count / len(sample_df) if sample_df else 0
+                    if null_fraction > 0.8:
+                        issues.append(f"Column '{col}' has high null values ({null_fraction*100:.1f}%)")
         
         if issues:
             return "Data quality issues detected: " + "; ".join(issues) + ". Should these columns be excluded?"
