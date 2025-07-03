@@ -218,33 +218,54 @@ Columns:
 
 Based on the actual data patterns you can see above, generate {max_suggestions} diverse, actionable machine learning query suggestions that a user could ask about this dataset. 
 
+COMPREHENSIVE ANALYSIS REQUIRED:
+1. **Data Understanding**: Look at column names, data types, and sample values to understand the business domain
+2. **Task Identification**: Identify what meaningful predictions or analyses could be performed
+3. **Practical Value**: Focus on queries that would provide real business insights or actionable outcomes
+4. **User-Friendly Language**: Write queries as natural business questions, not technical jargon
+5. **Diverse Approaches**: Include different types of ML tasks (classification, regression, clustering where appropriate)
+
 ANALYZE THE SAMPLE DATA to understand:
-- What domain this data actually represents (healthcare, finance, scientific, etc.)
-- What types of predictions would be meaningful
-- What clustering approaches would provide business value
-- Which columns contain the most predictive information
+- What domain this data actually represents (healthcare, finance, scientific, customer behavior, etc.)
+- What types of predictions would be meaningful and valuable
+- What clustering approaches would provide business insights
+- Which columns contain the most predictive or interesting information
+- What business problems could be solved with this data
 
 Each suggestion should:
-1. Be a complete, natural question/request
-2. Specify what to predict (target variable) 
-3. Be appropriate for the ACTUAL data patterns you observe
+1. Be a complete, natural question/request that a business user would ask
+2. Specify what to predict or analyze (target variable or pattern to find)
+3. Be appropriate for the ACTUAL data patterns and business domain you observe
 4. Be ready to use as-is in a prompt
+5. Provide clear business value and actionability
 
-Focus on the most obvious and useful ML tasks for this SPECIFIC data. Include different types of tasks (classification, regression, clustering if appropriate).
+TASK TYPE GUIDANCE:
+- **Classification**: When predicting categories, outcomes, or yes/no decisions
+- **Regression**: When predicting numerical values, amounts, or continuous measures  
+- **Clustering**: When discovering hidden patterns, customer segments, or grouping similar records
 
-For clustering tasks, analyze the actual data characteristics and suggest specific, meaningful clustering use cases based on what you observe in the sample data. Consider what business insights could be gained from grouping similar records.
+For clustering tasks, analyze the actual data characteristics and suggest specific, meaningful clustering use cases based on what you observe in the sample data. Consider what business insights could be gained from grouping similar records and how these groups could be used for decision-making.
+
+BUSINESS CONTEXT EXAMPLES:
+- E-commerce: "Predict which customers are likely to make a purchase in the next 30 days"
+- Healthcare: "Identify patients at high risk for readmission based on their medical history"
+- Finance: "Forecast monthly revenue based on historical trends and market indicators"
+- HR: "Segment employees into groups based on performance and engagement patterns"
+- Marketing: "Predict the optimal price for maximizing product sales"
 
 Return your response as a JSON array of objects with this format:
 [
   {{
-    "query": "Predict heart disease risk based on patient symptoms and test results",
+    "query": "Predict customer churn risk to identify at-risk accounts for proactive retention",
     "type": "classification", 
-    "target": "target",
-    "description": "Binary classification to identify patients at risk"
+    "target": "churn_flag",
+    "description": "Binary classification to identify customers likely to cancel their subscription",
+    "business_value": "Enable targeted retention campaigns and reduce customer acquisition costs",
+    "actionable_insights": "Focus retention efforts on high-risk customers, understand key churn drivers"
   }}
 ]
 
-Be concise but specific. Make the queries sound natural and actionable based on what you actually see in the data."""
+Make the queries sound natural, business-focused, and directly actionable based on what you actually see in the data."""
 
         try:
             response = await self.client.chat.completions.create(
@@ -254,7 +275,7 @@ Be concise but specific. Make the queries sound natural and actionable based on 
                     {"role": "user", "content": prompt}
                 ],
                 temperature=0.7,
-                max_tokens=1000
+                max_tokens=1500  # Increased for more comprehensive suggestions
             )
             
             # Parse JSON response
@@ -281,7 +302,9 @@ Be concise but specific. Make the queries sound natural and actionable based on 
                         "query": suggestion.get("query", "").strip(),
                         "type": suggestion.get("type", "classification").lower(),
                         "target": suggestion.get("target", ""),
-                        "description": suggestion.get("description", "")
+                        "description": suggestion.get("description", ""),
+                        "business_value": suggestion.get("business_value", ""),
+                        "actionable_insights": suggestion.get("actionable_insights", "")
                     }
                     
                     if clean_suggestion["query"]:  # Must have a query

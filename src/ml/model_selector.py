@@ -199,7 +199,7 @@ class ModelSelector:
                     {"role": "user", "content": context}
                 ],
                 temperature=0.2,
-                max_tokens=2000
+                max_tokens=3000  # Increased for more comprehensive recommendations
             )
             
             response_text = response.choices[0].message.content.strip()
@@ -248,54 +248,90 @@ class ModelSelector:
             return self._get_fallback_recommendations(data_profile, task_type)
     
     def _get_system_prompt(self) -> str:
-        """System prompt for model recommendation"""
-        return """You are an expert ML engineer specializing in model selection and ensemble design.
+        """Enhanced system prompt for comprehensive model recommendation"""
+        return """You are an expert ML engineer and data scientist with deep expertise in model selection, ensemble design, and practical ML deployment.
 
-Given a dataset profile and task description, recommend the best ensemble of 3-5 models.
+Your role is to analyze dataset characteristics and business requirements to recommend the optimal combination of 3-5 machine learning models that will work together in an ensemble.
 
-Output ONLY valid JSON matching this schema:
+Consider these factors when making recommendations:
+1. **Dataset Size & Complexity**: Small (<1000), Medium (1K-10K), Large (>10K) datasets require different approaches
+2. **Feature Characteristics**: Numeric vs categorical ratios, missing data patterns, feature interactions
+3. **Business Context**: Time constraints, interpretability needs, deployment requirements
+4. **Model Diversity**: Ensure complementary strengths (linear + non-linear, simple + complex, different biases)
+5. **Training Efficiency**: Balance accuracy potential with computational costs
+6. **Ensemble Synergy**: Models should have different error patterns to benefit from voting/stacking
+
+OUTPUT FORMAT: Respond with ONLY valid JSON matching this schema:
 
 {
   "recommended_models": [
     {
-              "model_type": "random_forest" | "xgboost" | "lightgbm" | "neural_network" | "svm" | "logistic_regression" | "linear_regression" | "knn" | "naive_bayes" | "kmeans" | "dbscan" | "hierarchical" | "spectral" | "gaussian_mixture",
-        "model_family": "tree_based" | "linear" | "neural" | "ensemble" | "instance_based" | "probabilistic" | "clustering",
+      "model_type": "random_forest" | "xgboost" | "lightgbm" | "neural_network" | "svm" | "logistic_regression" | "linear_regression" | "knn" | "naive_bayes" | "kmeans" | "dbscan" | "hierarchical" | "spectral" | "gaussian_mixture",
+      "model_family": "tree_based" | "linear" | "neural" | "ensemble" | "instance_based" | "probabilistic" | "clustering",
       "complexity_score": 1-10,
       "expected_training_time": "fast" | "medium" | "slow",
       "parameter_estimates": {
-        "key_params": "values with rough estimates"
+        "key_hyperparameters": "realistic estimates based on data size and complexity"
       },
-      "reasoning": "why this model fits the data/task",
-      "pros": ["advantage 1", "advantage 2", "advantage 3"],
-      "cons": ["limitation 1", "limitation 2"],
-      "best_for": "specific use case description",
-      "training_time_estimate": "X minutes",
+      "reasoning": "Detailed explanation of why this model fits the specific dataset and task requirements",
+      "pros": ["specific advantage 1", "specific advantage 2", "specific advantage 3"],
+      "cons": ["specific limitation 1", "specific limitation 2"],
+      "best_for": "Specific use case where this model excels given the data characteristics",
+      "training_time_estimate": "X minutes/hours based on data size",
       "memory_usage": "low" | "medium" | "high",
-      "interpretability": "high" | "medium" | "low"
+      "interpretability": "high" | "medium" | "low",
+      "handles_missing_data": true | false,
+      "handles_categorical": true | false,
+      "overfitting_risk": "low" | "medium" | "high"
     }
   ],
   "ensemble_strategy": {
     "method": "voting" | "stacking" | "blending",
     "diversity_score": 0.0-1.0,
-    "reasoning": "why this ensemble strategy"
+    "reasoning": "Why this specific ensemble strategy works best for these models and data characteristics",
+    "expected_improvement": "Quantitative estimate of ensemble benefit over individual models"
   },
   "recommendations_summary": {
-    "total_training_time": "estimated total time",
-    "recommended_combination": "suggested subset for optimal balance"
+    "total_training_time": "Realistic estimate including hyperparameter tuning",
+    "recommended_combination": "Specific advice on which 2-3 models to prioritize if time/resources are limited",
+    "deployment_considerations": "Practical notes about model serving and monitoring",
+    "data_preprocessing_notes": "Specific preprocessing recommendations for optimal performance"
   }
 }
 
-RULES:
-1. Recommend 3-5 diverse models that complement each other
-2. Consider data size, feature count, and complexity
-3. Balance accuracy potential with training time
-4. Ensure model diversity (different families/approaches)
-5. For small datasets (<1000 rows): prefer simpler models
-6. For large datasets (>2000 rows): can use complex models such as neural networks. In fact, neural networks are the best models for large datasets.
-7. For high-dimensional data: consider regularization
-8. Provide clear pros/cons for user decision-making
-9. Estimate realistic training times
-10. ONLY output JSON, no other text"""
+ADVANCED GUIDELINES:
+
+**For Small Datasets (<1000 rows):**
+- Prefer regularized linear models, simple tree ensembles
+- Avoid deep neural networks (high overfitting risk)
+- Consider Naive Bayes for text/categorical features
+- Use cross-validation aware estimates
+
+**For Medium Datasets (1K-10K rows):**
+- Balanced approach: tree methods + linear + possibly neural
+- XGBoost/LightGBM with careful regularization
+- SVM with appropriate kernels
+- Consider feature engineering complexity
+
+**For Large Datasets (>10K rows):**
+- Neural networks become viable and recommended
+- Complex tree ensembles (Random Forest + Gradient Boosting)
+- Deep models for complex pattern recognition
+- Scalability becomes important
+
+**Model Synergy Rules:**
+- Always include one fast, interpretable baseline (linear/tree)
+- Mix model families for diversity (linear + tree + neural)
+- Consider feature preprocessing differences (scaling sensitive vs not)
+- Balance interpretable vs black-box models
+
+**Business Context Integration:**
+- High interpretability needs → prefer linear, tree-based models
+- Real-time inference → include fast models (linear, small trees)
+- Batch prediction → can use slower, more complex models
+- Missing data handling → prefer tree-based over linear methods
+
+Provide specific, actionable recommendations tailored to the exact dataset characteristics provided."""
 
     def _prepare_context(
         self, 
@@ -304,55 +340,177 @@ RULES:
         target_column: str,
         constraints: Dict[str, Any]
     ) -> str:
-        """Prepare context for LLM"""
+        """Enhanced context preparation with comprehensive dataset analysis"""
         
-        # Analyze target column
+        # Analyze target column in detail
         target_info = data_profile.columns.get(target_column, {})
         
-        # Count feature types
+        # Count and categorize feature types
         numeric_features = 0
         categorical_features = 0
         high_cardinality_features = 0
+        missing_data_features = 0
+        skewed_features = 0
+        
+        feature_analysis = {
+            "numeric": [],
+            "categorical_low": [],
+            "categorical_high": [],
+            "high_missing": [],
+            "skewed": []
+        }
         
         for col, col_info in data_profile.columns.items():
             if col == target_column:
                 continue
-            if col_info["dtype"] in ["int64", "float64"]:
+                
+            dtype = col_info.get("dtype", "")
+            n_unique = col_info.get("n_unique", 0)
+            null_fraction = col_info.get("fraction_null", 0)
+            
+            if dtype in ["int64", "float64"]:
                 numeric_features += 1
-            elif col_info["dtype"] == "object":
-                if col_info["n_unique"] > 100:
+                feature_analysis["numeric"].append(col)
+                # Check for skewness if available
+                if null_fraction > 0.3:
+                    feature_analysis["high_missing"].append(col)
+            elif dtype == "object":
+                if n_unique > 100:
                     high_cardinality_features += 1
+                    feature_analysis["categorical_high"].append(col)
                 else:
                     categorical_features += 1
+                    feature_analysis["categorical_low"].append(col)
+                
+                if null_fraction > 0.3:
+                    feature_analysis["high_missing"].append(col)
+            
+            if null_fraction > 0.2:
+                missing_data_features += 1
         
-        # Identify potential challenges
-        challenges = []
+        # Determine dataset size category
         if data_profile.n_rows < 1000:
-            challenges.append("small dataset")
-        if data_profile.n_cols > data_profile.n_rows:
-            challenges.append("high dimensional")
+            size_category = "Small"
+            size_implications = "Prefer simpler models to avoid overfitting. Limited data for complex patterns."
+        elif data_profile.n_rows < 10000:
+            size_category = "Medium" 
+            size_implications = "Good balance - can use moderate complexity models with proper validation."
+        else:
+            size_category = "Large"
+            size_implications = "Can leverage complex models including neural networks. Computational efficiency matters."
+        
+        # Analyze potential challenges and opportunities
+        challenges = []
+        opportunities = []
+        
+        if missing_data_features > 0:
+            challenges.append(f"Missing data in {missing_data_features} features ({missing_data_features/len(data_profile.columns)*100:.1f}%)")
+        
         if high_cardinality_features > 0:
-            challenges.append("high cardinality categoricals")
+            challenges.append(f"High cardinality categoricals: {len(feature_analysis['categorical_high'])} features")
+        
+        if data_profile.n_cols > data_profile.n_rows:
+            challenges.append("High dimensional data (more features than samples)")
+        
         if len(data_profile.issues) > 0:
             challenges.extend(data_profile.issues[:3])
         
-        context = f"""Dataset Profile:
-- Task: {task_type}
-- Target: {target_column} (type: {target_info.get('dtype', 'unknown')})
-- Rows: {data_profile.n_rows:,}
-- Features: {data_profile.n_cols} total ({numeric_features} numeric, {categorical_features} categorical, {high_cardinality_features} high-cardinality)
-- Challenges: {', '.join(challenges) if challenges else 'none detected'}
+        # Identify opportunities
+        if numeric_features > categorical_features:
+            opportunities.append("Numeric-heavy dataset - good for linear models and neural networks")
+        
+        if categorical_features > 0:
+            opportunities.append("Mixed data types - tree-based models will handle well")
+        
+        if data_profile.n_rows > 5000:
+            opportunities.append("Sufficient data for ensemble methods and hyperparameter tuning")
+        
+        # Target analysis for task-specific insights
+        target_analysis = ""
+        if target_info:
+            unique_targets = target_info.get('n_unique', 'unknown')
+            null_fraction = target_info.get('fraction_null', 0)
+            
+            if task_type == "classification":
+                if unique_targets == 2:
+                    target_analysis = f"Binary classification task. Target balance should be considered for metric selection."
+                elif unique_targets <= 10:
+                    target_analysis = f"Multi-class classification with {unique_targets} classes. Class imbalance may be a factor."
+                else:
+                    target_analysis = f"Multi-class problem with {unique_targets} classes - consider hierarchical approaches."
+            else:
+                target_analysis = f"Regression task. Target has {unique_targets} unique values."
+            
+            if null_fraction > 0:
+                target_analysis += f" Note: {null_fraction*100:.1f}% missing target values."
+        
+        # Time and resource constraints analysis
+        constraint_analysis = ""
+        time_budget = constraints.get('time_budget', 'medium')
+        feature_limit = constraints.get('feature_limit')
+        
+        if time_budget == 'fast':
+            constraint_analysis = "Fast turnaround required - prioritize quick-training models (linear, simple trees)."
+        elif time_budget == 'slow':
+            constraint_analysis = "Comprehensive analysis - can use complex models with extensive hyperparameter tuning."
+        
+        if feature_limit:
+            constraint_analysis += f" Feature selection needed (limit: {feature_limit})."
+        
+        # Business domain context
+        domain_context = ""
+        if any(indicator in target_column.lower() for indicator in ["price", "revenue", "sales", "cost"]):
+            domain_context = "Financial prediction - interpretability and robustness to outliers important."
+        elif any(indicator in target_column.lower() for indicator in ["risk", "fraud", "default"]):
+            domain_context = "Risk assessment - precision/recall balance critical, regulatory compliance may require interpretability."
+        elif any(indicator in target_column.lower() for indicator in ["churn", "conversion", "retention"]):
+            domain_context = "Customer behavior - understanding feature importance crucial for actionable insights."
+        
+        context = f"""DATASET ANALYSIS REPORT
 
-Target Analysis:
-- Unique values: {target_info.get('n_unique', 'unknown')}
-- Null fraction: {target_info.get('fraction_null', 0):.2%}
+**Basic Statistics:**
+- Task Type: {task_type.title()}
+- Target Variable: {target_column}
+- Dataset Size: {data_profile.n_rows:,} rows × {data_profile.n_cols} columns ({size_category})
+- Size Implications: {size_implications}
 
-Constraints:
-- Feature limit: {constraints.get('feature_limit', 'none')}
-- Time budget: {constraints.get('time_budget', 'medium')}
-- Excluded columns: {constraints.get('exclude_cols', [])}
+**Feature Composition:**
+- Numeric Features: {numeric_features} ({numeric_features/data_profile.n_cols*100:.1f}%)
+- Categorical Features: {categorical_features} ({categorical_features/data_profile.n_cols*100:.1f}%)
+- High-Cardinality Categoricals: {high_cardinality_features}
+- Features with >20% Missing Data: {missing_data_features}
 
-Recommend an ensemble of 3-5 diverse models optimized for this dataset."""
+**Target Variable Analysis:**
+{target_analysis}
+
+**Data Quality & Challenges:**
+{chr(10).join(['- ' + challenge for challenge in challenges]) if challenges else '- No major data quality issues detected'}
+
+**Opportunities:**
+{chr(10).join(['- ' + opp for opp in opportunities]) if opportunities else '- Standard dataset suitable for most algorithms'}
+
+**Business Context:**
+{domain_context if domain_context else '- General ML task - standard model selection applies'}
+
+**Resource Constraints:**
+- Time Budget: {time_budget.title()}
+- {constraint_analysis}
+- Excluded Features: {constraints.get('exclude_cols', [])}
+
+**Feature Details:**
+- Numeric: {', '.join(feature_analysis['numeric'][:10])}{'...' if len(feature_analysis['numeric']) > 10 else ''}
+- Low-Card Categorical: {', '.join(feature_analysis['categorical_low'][:5])}{'...' if len(feature_analysis['categorical_low']) > 5 else ''}
+- High-Card Categorical: {', '.join(feature_analysis['categorical_high'][:3])}{'...' if len(feature_analysis['categorical_high']) > 3 else ''}
+
+REQUIREMENTS:
+Based on this comprehensive analysis, recommend an optimal ensemble of 3-5 diverse models that will:
+1. Handle the specific data characteristics effectively
+2. Provide complementary strengths and error patterns
+3. Meet the time/resource constraints
+4. Deliver actionable insights for the business context
+5. Balance accuracy with interpretability needs
+
+Consider the dataset size, feature types, missing data patterns, and business domain when selecting models and ensemble strategy."""
         
         return context
     

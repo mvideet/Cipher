@@ -150,6 +150,7 @@ async def _process_and_train_pipeline(
             if file_size_mb > settings.MAX_FILE_SIZE_MB:
                 raise ValueError(f"File too large. Max size: {settings.MAX_FILE_SIZE_MB}MB")
 
+            # Generate a unique hash of the file contents to identify duplicate datasets
             dataset_hash = hashlib.sha1(file_content).hexdigest()
 
             import io
@@ -158,15 +159,26 @@ async def _process_and_train_pipeline(
                 raise ValueError("Dataset is empty")
             
             # Create run record
+            # Choose between EnhancedRun or Run model based on whether enhanced mode is enabled
             run_model = EnhancedRun if enhanced else Run
+            
+            # Create a new run record in the database with:
+            # - The generated run_id
+            # - The user's original prompt text
+            # - A hash of the dataset to identify duplicates
+            # - Initial status of "parsing_prompt"
             run = run_model(
                 id=run_id,
-                user_prompt=prompt,
+                user_prompt=prompt, 
                 dataset_hash=dataset_hash,
                 status="parsing_prompt"
             )
+            
+            # Add the run to the database session
             db.add(run)
+            # Commit the transaction to save it
             db.commit()
+            # Refresh to get the latest state from the database
             db.refresh(run)
 
             # Parse prompt
@@ -174,6 +186,8 @@ async def _process_and_train_pipeline(
                 session_id, {"status": "parsing_prompt", "message": "Parsing prompt with AI..."}
             )
             prompt_parser = PromptParser()
+            
+            # Create a preview of the dataset for the prompt parser
             dataset_preview = {
                 "columns": df.columns.tolist(),
                 "dtypes": df.dtypes.astype(str).to_dict(),
@@ -185,6 +199,11 @@ async def _process_and_train_pipeline(
                 prompt=prompt,
                 dataset_preview=dataset_preview
             )
+            # PromptParser is imported from src/ml/prompt_parser.py
+            # It uses GPT-4 to parse the user's natural language prompt into structured ML task parameters
+            # Returns a PromptResponse object with task type, target column, metric, etc.
+            # await is used to pause execution and wait for an asynchronous operation to complete
+            # In this case, we wait for prompt_parser.parse_prompt() to finish before continuing
             prompt_response = await prompt_parser.parse_prompt(prompt_request)
             
             if prompt_response.clarifications_needed:

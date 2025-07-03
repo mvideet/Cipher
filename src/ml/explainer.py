@@ -4,7 +4,7 @@ SHAP-based model explainer for generating feature importance and explanations
 
 import pickle
 from pathlib import Path
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 
 import pandas as pd
 import numpy as np
@@ -304,37 +304,330 @@ class Explainer:
             return X_original.columns.tolist() if hasattr(X_original, 'columns') else [f"feature_{i}" for i in range(X_original.shape[1])]
     
     async def _explain_with_coefficients(self, pipeline, X, target_col):
-        """Explain using model coefficients for linear models"""
+        """Enhanced explanation using model coefficients for linear models"""
         
         model, X_processed, feature_names = self._extract_model_and_features(pipeline, X)
         
         # Check if model has coefficients
-        if hasattr(model, 'coef_'):
-            coef = model.coef_
-            if coef.ndim > 1:
-                coef = coef[0]  # Take first class for multi-class
-            
-            # Create feature importance from coefficients
-            feature_importance = {}
-            for i, name in enumerate(feature_names[:len(coef)]):
-                feature_importance[name] = float(abs(coef[i]))
-            
-            # Sort by importance
-            sorted_importance = dict(sorted(
-                feature_importance.items(), 
-                key=lambda x: x[1], 
-                reverse=True
-            ))
-            
-            return {
-                "feature_importance": sorted_importance,
-                "plot_path": None,
-                "text_explanation": f"Linear model coefficients show that {', '.join(list(sorted_importance.keys())[:3])} are the most influential features for predicting {target_col}.",
-                "n_samples_explained": len(X),
-                "explanation_method": "Coefficients"
-            }
-        else:
+        if not hasattr(model, 'coef_'):
             raise ValueError("Model does not have coefficients")
+        
+        coef = model.coef_
+        if coef.ndim > 1:
+            coef = coef[0]  # Take first class for multi-class
+        
+        # Get intercept if available
+        intercept = getattr(model, 'intercept_', 0)
+        
+        # Create feature importance from coefficients
+        feature_importance = {}
+        coefficient_details = {}
+        
+        for i, name in enumerate(feature_names[:len(coef)]):
+            coef_value = float(coef[i])
+            abs_coef = abs(coef_value)
+            
+            feature_importance[name] = abs_coef
+            coefficient_details[name] = {
+                "coefficient": coef_value,
+                "abs_coefficient": abs_coef,
+                "direction": "positive" if coef_value > 0 else "negative",
+                "magnitude": "high" if abs_coef > np.std(np.abs(coef)) else "medium" if abs_coef > np.std(np.abs(coef))/2 else "low"
+            }
+        
+        # Sort by importance
+        sorted_importance = dict(sorted(
+            feature_importance.items(), 
+            key=lambda x: x[1], 
+            reverse=True
+        ))
+        
+        # Generate enhanced explanation for regression
+        explanation_method = "Linear Coefficients"
+        if hasattr(model, '__class__'):
+            model_name = model.__class__.__name__.lower()
+            if 'regression' in model_name:
+                explanation_method = "Linear Regression Coefficients"
+                enhanced_explanation = await self._generate_linear_regression_explanation(
+                    coefficient_details, sorted_importance, target_col, intercept, model
+                )
+            else:
+                enhanced_explanation = await self._generate_linear_classification_explanation(
+                    coefficient_details, sorted_importance, target_col, model
+                )
+        else:
+            enhanced_explanation = f"Linear model coefficients show that {', '.join(list(sorted_importance.keys())[:3])} are the most influential features for predicting {target_col}."
+        
+        # Create coefficient plot
+        plot_path = self._create_coefficient_plot(coefficient_details, feature_names, pipeline, X.shape[0])
+        
+        return {
+            "feature_importance": sorted_importance,
+            "coefficient_details": coefficient_details,
+            "intercept": float(intercept) if isinstance(intercept, (int, float, np.number)) else intercept,
+            "plot_path": plot_path,
+            "text_explanation": enhanced_explanation,
+            "n_samples_explained": len(X),
+            "explanation_method": explanation_method
+        }
+    
+    async def _generate_linear_regression_explanation(
+        self, 
+        coefficient_details: Dict[str, Dict], 
+        feature_importance: Dict[str, float], 
+        target_col: str,
+        intercept: float,
+        model
+    ) -> str:
+        """Generate detailed explanation for linear regression models"""
+        
+        if not self.client:
+            return self._generate_basic_regression_explanation(coefficient_details, feature_importance, target_col)
+        
+        try:
+            # Get top features
+            top_features = list(feature_importance.items())[:8]
+            
+            # Calculate R-squared if possible
+            r_squared_info = ""
+            try:
+                if hasattr(model, 'score'):
+                    # Note: We can't calculate R² here without test data, but we can mention it
+                    r_squared_info = "\n\nNote: Model R-squared score indicates how well the model explains variance in the target variable."
+            except:
+                pass
+            
+            # Prepare detailed coefficient information
+            coef_details = []
+            for feature, importance in top_features:
+                details = coefficient_details[feature]
+                direction = details["direction"]
+                magnitude = details["magnitude"]
+                coef_val = details["coefficient"]
+                
+                coef_details.append(f"- {feature}: {coef_val:.4f} ({direction} impact, {magnitude} magnitude)")
+            
+            coef_text = "\n".join(coef_details)
+            
+            prompt = f"""Based on the following linear regression coefficients for predicting '{target_col}', write a comprehensive explanation (≤200 words) describing:
+
+1. Which features have the strongest positive/negative effects
+2. The practical meaning of these coefficients
+3. How to interpret the magnitude of effects
+4. Business insights and actionable recommendations
+
+Model Details:
+- Intercept: {intercept:.4f}
+- Target Variable: {target_col}
+
+Top Coefficients:
+{coef_text}
+
+Key Points to Address:
+- A coefficient of X means: "holding all other features constant, a 1-unit increase in this feature leads to an X-unit change in {target_col}"
+- Positive coefficients increase {target_col}, negative coefficients decrease it
+- Larger absolute values indicate stronger influence
+- Consider which features are most actionable for business decisions{r_squared_info}
+
+Write for business stakeholders who need to understand what drives {target_col} and how to act on these insights."""
+
+            response = await self.client.chat.completions.create(
+                model=settings.OPENAI_MODEL,
+                messages=[
+                    {"role": "system", "content": "You are a data science expert explaining linear regression results to business stakeholders. Focus on practical interpretation and actionable insights."},
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=0.3,
+                max_tokens=300
+            )
+            
+            explanation = response.choices[0].message.content.strip()
+            logger.info("Generated linear regression explanation", length=len(explanation))
+            return explanation
+            
+        except Exception as e:
+            logger.error("Failed to generate linear regression explanation", error=str(e))
+            return self._generate_basic_regression_explanation(coefficient_details, feature_importance, target_col)
+    
+    async def _generate_linear_classification_explanation(
+        self, 
+        coefficient_details: Dict[str, Dict], 
+        feature_importance: Dict[str, float], 
+        target_col: str,
+        model
+    ) -> str:
+        """Generate detailed explanation for linear classification models"""
+        
+        if not self.client:
+            return self._generate_basic_classification_explanation(coefficient_details, feature_importance, target_col)
+        
+        try:
+            # Get top features
+            top_features = list(feature_importance.items())[:8]
+            
+            # Prepare detailed coefficient information
+            coef_details = []
+            for feature, importance in top_features:
+                details = coefficient_details[feature]
+                direction = details["direction"]
+                coef_val = details["coefficient"]
+                
+                effect_desc = "increases" if direction == "positive" else "decreases"
+                coef_details.append(f"- {feature}: {coef_val:.4f} ({effect_desc} probability of {target_col})")
+            
+            coef_text = "\n".join(coef_details)
+            
+            prompt = f"""Based on the following logistic regression coefficients for predicting '{target_col}', write a clear explanation (≤150 words) describing:
+
+1. Which features most strongly influence the probability of {target_col}
+2. How to interpret positive vs negative coefficients
+3. Business implications and actionable insights
+
+Top Coefficients:
+{coef_text}
+
+Key Points:
+- Positive coefficients increase the odds/probability of {target_col}
+- Negative coefficients decrease the odds/probability of {target_col}
+- Larger absolute values indicate stronger influence on the prediction
+- Focus on practical business meaning and what actions can be taken
+
+Write for business users who need to understand what factors drive {target_col} outcomes."""
+
+            response = await self.client.chat.completions.create(
+                model=settings.OPENAI_MODEL,
+                messages=[
+                    {"role": "system", "content": "You are a data science expert explaining logistic regression results to business users. Focus on probability interpretation and business impact."},
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=0.3,
+                max_tokens=250
+            )
+            
+            explanation = response.choices[0].message.content.strip()
+            logger.info("Generated linear classification explanation", length=len(explanation))
+            return explanation
+            
+        except Exception as e:
+            logger.error("Failed to generate linear classification explanation", error=str(e))
+            return self._generate_basic_classification_explanation(coefficient_details, feature_importance, target_col)
+    
+    def _generate_basic_regression_explanation(
+        self, 
+        coefficient_details: Dict[str, Dict], 
+        feature_importance: Dict[str, float], 
+        target_col: str
+    ) -> str:
+        """Generate basic regression explanation without LLM"""
+        
+        top_features = list(feature_importance.items())[:5]
+        positive_features = []
+        negative_features = []
+        
+        for feature, _ in top_features:
+            details = coefficient_details[feature]
+            if details["direction"] == "positive":
+                positive_features.append(feature)
+            else:
+                negative_features.append(feature)
+        
+        explanation = f"Linear regression analysis shows that "
+        
+        if positive_features:
+            explanation += f"{', '.join(positive_features[:3])} have positive effects on {target_col}"
+            if negative_features:
+                explanation += f", while {', '.join(negative_features[:2])} have negative effects"
+        elif negative_features:
+            explanation += f"{', '.join(negative_features[:3])} have negative effects on {target_col}"
+        
+        explanation += f". The model coefficients indicate the magnitude of change in {target_col} for each unit increase in these features."
+        
+        return explanation
+    
+    def _generate_basic_classification_explanation(
+        self, 
+        coefficient_details: Dict[str, Dict], 
+        feature_importance: Dict[str, float], 
+        target_col: str
+    ) -> str:
+        """Generate basic classification explanation without LLM"""
+        
+        top_features = list(feature_importance.items())[:5]
+        positive_features = []
+        negative_features = []
+        
+        for feature, _ in top_features:
+            details = coefficient_details[feature]
+            if details["direction"] == "positive":
+                positive_features.append(feature)
+            else:
+                negative_features.append(feature)
+        
+        explanation = f"Logistic regression analysis shows that "
+        
+        if positive_features:
+            explanation += f"{', '.join(positive_features[:3])} increase the probability of {target_col}"
+            if negative_features:
+                explanation += f", while {', '.join(negative_features[:2])} decrease the probability"
+        elif negative_features:
+            explanation += f"{', '.join(negative_features[:3])} decrease the probability of {target_col}"
+        
+        explanation += ". The coefficients represent the log-odds change for each unit increase in these features."
+        
+        return explanation
+    
+    def _create_coefficient_plot(self, coefficient_details: Dict[str, Dict], feature_names: List[str], model_path, n_samples: int):
+        """Create and save coefficient plot for linear models"""
+        
+        try:
+            # Get top 15 features by absolute coefficient value
+            sorted_features = sorted(
+                coefficient_details.items(), 
+                key=lambda x: x[1]["abs_coefficient"], 
+                reverse=True
+            )[:15]
+            
+            features = [item[0] for item in sorted_features]
+            coefficients = [item[1]["coefficient"] for item in sorted_features]
+            
+            # Create horizontal bar plot
+            plt.figure(figsize=(12, 8))
+            
+            # Color bars by positive/negative
+            colors = ['green' if coef > 0 else 'red' for coef in coefficients]
+            
+            plt.barh(range(len(features)), coefficients, color=colors, alpha=0.7)
+            plt.yticks(range(len(features)), features)
+            plt.xlabel('Coefficient Value')
+            plt.title('Linear Model Coefficients\n(Positive = Increases Target, Negative = Decreases Target)')
+            plt.grid(axis='x', alpha=0.3)
+            
+            # Add value labels on bars
+            for i, coef in enumerate(coefficients):
+                plt.text(coef + (0.01 * max(abs(c) for c in coefficients)), i, f'{coef:.3f}', 
+                        va='center', ha='left' if coef > 0 else 'right', fontsize=9)
+            
+            # Add vertical line at x=0
+            plt.axvline(x=0, color='black', linestyle='-', alpha=0.5)
+            
+            plt.gca().invert_yaxis()  # Most important at top
+            plt.tight_layout()
+            
+            # Save plot
+            if hasattr(model_path, 'parent'):
+                plot_dir = model_path.parent
+            else:
+                plot_dir = Path(str(model_path)).parent
+            plot_path = plot_dir / "linear_coefficients.png"
+            plt.savefig(plot_path, dpi=150, bbox_inches='tight')
+            plt.close()
+            
+            logger.info("Coefficient plot saved", path=str(plot_path))
+            return str(plot_path)
+            
+        except Exception as e:
+            logger.error("Failed to create coefficient plot", error=str(e))
+            return None
     
     async def _explain_with_feature_importance(self, pipeline, X, target_col):
         """Explain using built-in feature importance"""
