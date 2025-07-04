@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Setup script for AutoML Desktop
+Setup script for Cipher Desktop
 Automates the installation process
 """
 
@@ -106,7 +106,7 @@ def create_directories():
 
 def main():
     """Main setup function"""
-    print("🚀 AutoML Desktop Setup")
+    print("🚀 Cipher Desktop Setup")
     print("=" * 50)
     
     # Check requirements

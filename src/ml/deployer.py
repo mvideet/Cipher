@@ -133,7 +133,7 @@ import uvicorn
 with open("model.pkl", "rb") as f:
     model = pickle.load(f)
 
-app = FastAPI(title="AutoML Model API", version="1.0.0")
+app = FastAPI(title="Cipher Model API", version="1.0.0")
 
 class PredictionRequest(BaseModel):
     inputs: List[Dict[str, Any]]
@@ -234,7 +234,7 @@ CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8000"]
     def _generate_docker_tag(self, run_id: str) -> str:
         """Generate Docker tag for the model"""
         timestamp = datetime.now().strftime("%Y%m%d_%H%M")
-        return f"automl/model_{run_id}:{timestamp}"
+        return f"cipher/model_{run_id}:{timestamp}"
     
     def _build_docker_image(self, build_context: Path, tag: str):
         """Build Docker image"""

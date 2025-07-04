@@ -1,4 +1,4 @@
-// API client for AutoML Desktop backend communication
+// API client for Cipher Desktop backend communication
 
 class APIClient {
     constructor() {
@@ -346,8 +346,8 @@ class APIClient {
     // Check backend health
     async checkHealth() {
         try {
-            console.log('🏥 Checking backend health at http://127.0.0.1:8001/health');
-            const response = await fetch('http://127.0.0.1:8001/health');
+            console.log('🏥 Checking backend health at http://127.0.0.1:8001/api/v1/health');
+            const response = await fetch(`${this.baseURL}/health`);
             console.log('🏥 Health check response status:', response.status);
             console.log('🏥 Health check response ok:', response.ok);
             

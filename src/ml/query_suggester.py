@@ -1,5 +1,5 @@
 """
-GPT-powered query suggestion engine for AutoML datasets
+GPT-powered query suggestion engine for Cipher datasets
 """
 
 import structlog

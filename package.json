@@ -1,12 +1,12 @@
 {
-  "name": "automl-desktop",
-  "version": "0.1.0",
-  "description": "Desktop AutoML Platform",
+  "name": "cipher-desktop",
+  "version": "1.0.0",
+  "description": "Desktop Cipher Platform",
   "main": "app/main.js",
   "scripts": {
     "start": "electron .",
     "dev": "concurrently \"npm run backend\" \"electron .\"",
-    "backend": "python -m uvicorn src.main:app --reload --port 8001 --host 127.0.0.1",
+    "backend": "venv/bin/python -m uvicorn src.main:app --reload --port 8001 --host 127.0.0.1",
     "build": "electron-builder",
     "pack": "electron-builder --dir",
     "dist": "electron-builder"
@@ -22,8 +22,8 @@
     "socket.io-client": "^4.7.2"
   },
   "build": {
-    "appId": "com.automl.desktop",
-    "productName": "AutoML Desktop",
+    "appId": "com.cipher.desktop",
+    "productName": "Cipher Desktop",
     "directories": {
       "output": "dist"
     },

@@ -1,1 +1,1 @@
-# AutoML Desktop - Core Package 
+# Cipher Desktop - Core Package 

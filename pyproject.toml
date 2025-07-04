@@ -1,8 +1,8 @@
 [tool.poetry]
-name = "automl-desktop"
-version = "0.1.0"
-description = "Desktop AutoML Platform with Electron UI and Python Backend"
-authors = ["AutoML Team"]
+name = "cipher-desktop"
+version = "1.0.0"
+description = "Desktop Cipher Platform with Electron UI and Python Backend"
+authors = ["Cipher Team"]
 packages = [{include = "src"}]
 
 [tool.poetry.dependencies]

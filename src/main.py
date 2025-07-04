@@ -1,5 +1,5 @@
 """
-AutoML Desktop - Main FastAPI Application
+Cipher Desktop - Main FastAPI Application
 Entry point for the backend API server
 """
 
@@ -38,7 +38,7 @@ def configure_logging():
     
     # Setup file handler for detailed logging
     from datetime import datetime
-    log_filename = logs_dir / f"automl_debug_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
+    log_filename = logs_dir / f"cipher_debug_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
     
     # Configure root logger to write to file
     root_logger = logging.getLogger()
@@ -94,7 +94,7 @@ async def lifespan(app: FastAPI):
     # Configure logging first
     configure_logging()
     
-    logger.info("Starting AutoML Desktop")
+    logger.info("Starting Cipher Desktop")
     
     # Create necessary directories
     settings.TEMP_DIR.mkdir(exist_ok=True)
@@ -106,13 +106,13 @@ async def lifespan(app: FastAPI):
     
     yield
     
-    logger.info("Shutting down AutoML Desktop")
+    logger.info("Shutting down Cipher Desktop")
 
 
 # Create FastAPI app
 app = FastAPI(
-    title="AutoML Desktop API",
-    description="Backend API for AutoML Desktop Application",
+    title="Cipher Desktop API",
+    description="Backend API for Cipher Desktop Application",
     version="0.1.0",
     lifespan=lifespan
 )
@@ -200,7 +200,8 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
                         close_error=str(close_error))
 
 
-@app.get("/health")
+# Move health check to API router
+@app.get("/api/v1/health")
 async def health_check():
     """Health check endpoint"""
     return {"status": "healthy", "version": "0.1.0"}

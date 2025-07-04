@@ -1,4 +1,4 @@
-// Utility functions for AutoML Desktop
+// Utility functions for Cipher Desktop
 
 // Generate unique session ID with fallback
 function generateSessionId() {

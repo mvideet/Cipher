@@ -1,5 +1,5 @@
 """
-Configuration settings for AutoML Desktop
+Configuration settings for Cipher Desktop
 """
 
 import os
@@ -29,7 +29,7 @@ class Settings(BaseSettings):
     RUNS_DIR: Path = BASE_DIR / "runs"
     
     # Database
-    DATABASE_URL: str = "sqlite:///./automl.db"
+    DATABASE_URL: str = "sqlite:///./cipher.db"
     
     # Training Configuration
     MAX_TRAINING_TIME_MINUTES: int = 15

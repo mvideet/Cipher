@@ -1,4 +1,4 @@
-# AutoML Desktop
+# Cipher Desktop
 
 A comprehensive desktop application for automated machine learning with a modern Electron UI and Python backend.
 
@@ -28,7 +28,7 @@ A comprehensive desktop application for automated machine learning with a modern
 1. **Clone the repository**
    ```bash
    git clone <repository-url>
-   cd automl-desktop
+   cd cipher-desktop
    ```
 
 2. **Set up environment variables**
@@ -152,7 +152,7 @@ The application automatically:
 ### Project Structure
 
 ```
-automl-desktop/
+cipher-desktop/
 ├── src/                    # Python backend
 │   ├── api/               # FastAPI routes and WebSocket
 │   ├── core/              # Configuration and utilities

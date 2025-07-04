@@ -1,4 +1,4 @@
-# AutoML Desktop Python Requirements
+# Cipher Desktop Python Requirements
 # Alternative to Poetry for dependency management
 
 fastapi>=0.104.1

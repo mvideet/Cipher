@@ -1,6 +1,6 @@
-// Main application entry point for AutoML Desktop
+// Main application entry point for Cipher Desktop
 
-class AutoMLApp {
+class CipherApp {
     constructor() {
         this.isInitialized = false;
         this.backendHealthy = false;
@@ -8,7 +8,7 @@ class AutoMLApp {
 
     // Initialize the application
     async init() {
-        console.log('Initializing AutoML Desktop Application...');
+        console.log('Initializing Cipher Desktop Application...');
 
         try {
             // Check if backend is available
@@ -27,9 +27,9 @@ class AutoMLApp {
             this.setupGlobalHandlers();
             
             this.isInitialized = true;
-            console.log('AutoML Desktop Application initialized successfully');
+            console.log('Cipher Desktop Application initialized successfully');
             
-            uiManager.showNotification('success', 'Application Ready', 'AutoML Desktop is ready to use');
+            uiManager.showNotification('success', 'Application Ready', 'Cipher Desktop is ready to use');
             
         } catch (error) {
             console.error('Failed to initialize application:', error);
@@ -314,7 +314,7 @@ class AutoMLApp {
         const errorMessage = `
             <div class="backend-error">
                 <h2>Backend Connection Error</h2>
-                <p>Failed to connect to the AutoML backend server.</p>
+                <p>Failed to connect to the Cipher backend server.</p>
                 <div class="error-details">
                     <strong>Error:</strong> ${error.message}
                 </div>
@@ -413,24 +413,24 @@ class AutoMLApp {
     // Cleanup resources
     cleanup() {
         apiClient.disconnect();
-        console.log('AutoML Desktop Application cleaned up');
+        console.log('Cipher Desktop Application cleaned up');
     }
 }
 
 // Initialize application when DOM is ready
 document.addEventListener('DOMContentLoaded', async () => {
-    console.log('DOM loaded, initializing AutoML Desktop...');
+    console.log('DOM loaded, initializing Cipher Desktop...');
     
     // Create global app instance
-    window.automlApp = new AutoMLApp();
+    window.cipherApp = new CipherApp();
     
     // Initialize the application
-    await window.automlApp.init();
+    await window.cipherApp.init();
 });
 
 // Handle app closing
 window.addEventListener('beforeunload', () => {
-    if (window.automlApp) {
-        window.automlApp.cleanup();
+    if (window.cipherApp) {
+        window.cipherApp.cleanup();
     }
 }); 

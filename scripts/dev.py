@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Development runner for AutoML Desktop
+Development runner for Cipher Desktop
 Starts both backend and frontend in development mode
 """
 
@@ -127,7 +127,7 @@ class DevRunner:
     
     def run(self):
         """Main run function"""
-        print("🚀 AutoML Desktop Development Server")
+        print("🚀 Cipher Desktop Development Server")
         print("=" * 50)
         
         # Setup signal handlers

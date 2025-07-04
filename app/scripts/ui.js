@@ -1,4 +1,4 @@
-// UI helper functions for AutoML Desktop
+// UI helper functions for Cipher Desktop
 
 class UIManager {
     constructor() {
@@ -2166,7 +2166,7 @@ class UIManager {
             
             const a = document.createElement('a');
             a.href = url;
-            a.download = `automl-audit-${this.currentRunId}.json`;
+            a.download = `cipher-audit-${this.currentRunId}.json`;
             a.click();
             
             URL.revokeObjectURL(url);

@@ -182,7 +182,7 @@ jspm_packages/
 .next
 
 # Application specific
-automl.db*
+cipher.db*
 models/
 runs/
 temp/
