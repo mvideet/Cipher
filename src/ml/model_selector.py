@@ -257,8 +257,8 @@ class ModelSelector:
             return self._get_fallback_recommendations(data_profile, task_type)
     
     def _get_system_prompt(self) -> str:
-        """Enhanced system prompt for comprehensive model recommendation"""
-        return """You are an expert ML engineer and data scientist with deep expertise in model selection, ensemble design, and practical ML deployment.
+        """Enhanced system prompt for comprehensive model recommendation including time series"""
+        return """You are an expert ML engineer and data scientist with deep expertise in model selection, ensemble design, and practical ML deployment, including specialized knowledge in time series forecasting.
 
 Your role is to analyze dataset characteristics and business requirements to recommend the optimal combination of 3-5 machine learning models that will work together in an ensemble.
 
@@ -269,14 +269,15 @@ Consider these factors when making recommendations:
 4. **Model Diversity**: Ensure complementary strengths (linear + non-linear, simple + complex, different biases)
 5. **Training Efficiency**: Balance accuracy potential with computational costs
 6. **Ensemble Synergy**: Models should have different error patterns to benefit from voting/stacking
+7. **Time Series Specifics**: For temporal data, consider seasonality, trends, stationarity, and forecast horizon
 
 OUTPUT FORMAT: Respond with ONLY valid JSON matching this schema:
 
 {
   "recommended_models": [
     {
-      "model_type": "random_forest" | "xgboost" | "lightgbm" | "catboost" | "hist_gradient_boosting" | "neural_network" | "svm" | "logistic_regression" | "linear_regression" | "knn" | "naive_bayes" | "isolation_forest" | "voting" | "stacking" | "kmeans" | "dbscan" | "hierarchical" | "spectral" | "gaussian_mixture",
-              "model_family": "tree_based" | "linear" | "neural" | "ensemble" | "instance_based" | "probabilistic" | "anomaly_detection" | "clustering",
+      "model_type": "random_forest" | "xgboost" | "lightgbm" | "catboost" | "hist_gradient_boosting" | "neural_network" | "svm" | "logistic_regression" | "linear_regression" | "knn" | "naive_bayes" | "isolation_forest" | "voting" | "stacking" | "kmeans" | "dbscan" | "hierarchical" | "spectral" | "gaussian_mixture" | "arima" | "prophet" | "exponential_smoothing" | "lstm_ts" | "seasonal_decompose",
+      "model_family": "tree_based" | "linear" | "neural" | "ensemble" | "instance_based" | "probabilistic" | "anomaly_detection" | "clustering" | "time_series",
       "complexity_score": 1-10,
       "expected_training_time": "fast" | "medium" | "slow",
       "parameter_estimates": {
@@ -295,7 +296,7 @@ OUTPUT FORMAT: Respond with ONLY valid JSON matching this schema:
     }
   ],
   "ensemble_strategy": {
-    "method": "voting" | "stacking" | "blending",
+    "method": "voting" | "stacking" | "blending" | "averaging",
     "diversity_score": 0.0-1.0,
     "reasoning": "Why this specific ensemble strategy works best for these models and data characteristics",
     "expected_improvement": "Quantitative estimate of ensemble benefit over individual models"
@@ -328,17 +329,47 @@ ADVANCED GUIDELINES:
 - Deep models for complex pattern recognition
 - Scalability becomes important
 
+**For Time Series Forecasting:**
+- **Data Length Considerations**:
+  - <100 points: Simple exponential smoothing, linear trend models
+  - 100-1000 points: ARIMA, Prophet, simple seasonality models
+  - >1000 points: LSTM, complex seasonal ARIMA, ensemble methods
+  
+- **Seasonality & Patterns**:
+  - Strong seasonality: Prophet, seasonal ARIMA, Holt-Winters
+  - Trend-dominated: Linear regression with time features, Prophet
+  - Irregular patterns: LSTM, ensemble of simple models
+  - Multiple seasonalities: Prophet, STL decomposition + modeling
+  
+- **Forecast Horizon**:
+  - Short-term (1-7 steps): ARIMA, exponential smoothing
+  - Medium-term (1-4 weeks): Prophet, seasonal models
+  - Long-term (months/years): Prophet with external regressors, ensemble
+  
+- **Data Frequency**:
+  - Daily: Prophet (handles holidays), seasonal ARIMA
+  - Weekly/Monthly: ARIMA, exponential smoothing, linear models
+  - Hourly: LSTM for complex patterns, Prophet for seasonality
+  
+- **Business Requirements**:
+  - Interpretability needed: ARIMA, exponential smoothing, linear trend
+  - Automatic seasonality: Prophet
+  - Complex non-linear patterns: LSTM, ensemble methods
+  - Uncertainty quantification: Prophet, ARIMA with confidence intervals
+
 **Model Synergy Rules:**
 - Always include one fast, interpretable baseline (linear/tree)
 - Mix model families for diversity (linear + tree + neural)
+- For time series: combine trend-following (Prophet) + pattern-learning (LSTM) + simple baseline (exponential smoothing)
 - Consider feature preprocessing differences (scaling sensitive vs not)
 - Balance interpretable vs black-box models
 
 **Business Context Integration:**
-- High interpretability needs → prefer linear, tree-based models
-- Real-time inference → include fast models (linear, small trees)
-- Batch prediction → can use slower, more complex models
-- Missing data handling → prefer tree-based over linear methods
+- High interpretability needs → prefer linear, tree-based models, ARIMA
+- Real-time inference → include fast models (linear, small trees, simple exponential smoothing)
+- Batch prediction → can use slower, more complex models (LSTM, complex ARIMA)
+- Missing data handling → prefer tree-based over linear methods, Prophet handles gaps well
+- Seasonal business patterns → Prophet, seasonal ARIMA, Holt-Winters
 
 Provide specific, actionable recommendations tailored to the exact dataset characteristics provided."""
 
@@ -748,6 +779,121 @@ Consider the dataset size, feature types, missing data patterns, and business do
                 }
             ]
             
+        elif model_type == "arima":
+            # ARIMA time series architectures
+            architectures = [
+                {
+                    "name": "simple_arima",
+                    "description": "Simple ARIMA model with auto-selection",
+                    "config": {"seasonal": False, "max_p": 3, "max_d": 2, "max_q": 3},
+                    "complexity": "low"
+                },
+                {
+                    "name": "seasonal_arima",
+                    "description": "Seasonal ARIMA with moderate complexity",
+                    "config": {"seasonal": True, "max_p": 5, "max_d": 2, "max_q": 5},
+                    "complexity": "medium"
+                },
+                {
+                    "name": "comprehensive_arima",
+                    "description": "Comprehensive ARIMA with extensive search",
+                    "config": {"seasonal": True, "max_p": 8, "max_d": 3, "max_q": 8},
+                    "complexity": "high"
+                }
+            ]
+            
+        elif model_type == "prophet":
+            # Prophet time series architectures
+            architectures = [
+                {
+                    "name": "basic_prophet",
+                    "description": "Basic Prophet with default seasonality",
+                    "config": {"yearly_seasonality": True, "weekly_seasonality": False, "daily_seasonality": False},
+                    "complexity": "low"
+                },
+                {
+                    "name": "seasonal_prophet",
+                    "description": "Prophet with weekly and yearly seasonality",
+                    "config": {"yearly_seasonality": True, "weekly_seasonality": True, "daily_seasonality": False},
+                    "complexity": "medium"
+                },
+                {
+                    "name": "full_prophet",
+                    "description": "Prophet with all seasonality components",
+                    "config": {"yearly_seasonality": True, "weekly_seasonality": True, "daily_seasonality": True},
+                    "complexity": "high"
+                }
+            ]
+            
+        elif model_type == "exponential_smoothing":
+            # Exponential Smoothing architectures
+            architectures = [
+                {
+                    "name": "simple_exponential",
+                    "description": "Simple exponential smoothing",
+                    "config": {"trend": None, "seasonal": None},
+                    "complexity": "low"
+                },
+                {
+                    "name": "holt_linear",
+                    "description": "Holt's linear trend method",
+                    "config": {"trend": "add", "seasonal": None},
+                    "complexity": "medium"
+                },
+                {
+                    "name": "holt_winters",
+                    "description": "Holt-Winters with seasonal component",
+                    "config": {"trend": "add", "seasonal": "add"},
+                    "complexity": "high"
+                }
+            ]
+            
+        elif model_type == "lstm_ts":
+            # LSTM time series architectures
+            architectures = [
+                {
+                    "name": "simple_lstm",
+                    "description": "Simple LSTM for time series",
+                    "config": {"hidden_size": 32, "num_layers": 1, "sequence_length": 10},
+                    "complexity": "low"
+                },
+                {
+                    "name": "deep_lstm",
+                    "description": "Deep LSTM with multiple layers",
+                    "config": {"hidden_size": 64, "num_layers": 2, "sequence_length": 20},
+                    "complexity": "medium"
+                },
+                {
+                    "name": "complex_lstm",
+                    "description": "Complex LSTM with attention mechanisms",
+                    "config": {"hidden_size": 128, "num_layers": 3, "sequence_length": 30},
+                    "complexity": "high"
+                }
+            ]
+            
+        elif model_type == "seasonal_decompose":
+            # Seasonal Decomposition architectures
+            architectures = [
+                {
+                    "name": "additive_decompose",
+                    "description": "Additive seasonal decomposition",
+                    "config": {"model": "additive", "period": "auto"},
+                    "complexity": "low"
+                },
+                {
+                    "name": "multiplicative_decompose",
+                    "description": "Multiplicative seasonal decomposition",
+                    "config": {"model": "multiplicative", "period": "auto"},
+                    "complexity": "medium"
+                },
+                {
+                    "name": "stl_decompose",
+                    "description": "STL (Seasonal and Trend decomposition using Loess)",
+                    "config": {"model": "stl", "period": "auto", "robust": True},
+                    "complexity": "high"
+                }
+            ]
+            
         else:
             # Default simple architectures for other models
             architectures = [
@@ -805,6 +951,17 @@ Consider the dataset size, feature types, missing data patterns, and business do
                 models = ["kmeans", "hierarchical", "dbscan"]
             else:
                 models = ["kmeans", "dbscan", "gaussian_mixture", "hierarchical"]
+        elif task_type == "forecasting":
+            # Time series forecasting models
+            if data_profile.n_rows < 100:
+                # Small datasets - use simple forecasting methods
+                models = ["exponential_smoothing", "arima"]
+            elif data_profile.n_rows < 1000:
+                # Medium datasets - balanced approach
+                models = ["arima", "exponential_smoothing", "prophet"]
+            else:
+                # Large datasets - can use more complex models
+                models = ["prophet", "arima", "lstm_ts"]
         elif data_profile.n_rows < 1000:
             # Small dataset - use simple, robust models
             models = ["logistic_regression", "random_forest"] if task_type == "classification" else ["linear_regression", "random_forest"]
@@ -816,15 +973,87 @@ Consider the dataset size, feature types, missing data patterns, and business do
             models = ["random_forest", "xgboost", "lightgbm"] if task_type == "classification" else ["random_forest", "xgboost", "lightgbm"]
         
         for model_type in models:
+            # Enhanced forecasting model characteristics
+            if task_type == "forecasting":
+                if model_type == "prophet":
+                    complexity = 6.0
+                    training_time = "medium"
+                    reasoning = "Excellent for seasonal patterns, handles holidays and missing data automatically"
+                    pros = ["Automatic seasonality detection", "Handles holidays and events", "Robust to missing data", "Provides uncertainty intervals"]
+                    cons = ["Requires pandas datetime index", "Can be slow on very large datasets", "Limited to univariate forecasting"]
+                    best_for = "Business time series with strong seasonality and known holidays"
+                    interpretability = "high"
+                    memory_usage = "medium"
+                elif model_type == "arima":
+                    complexity = 7.0
+                    training_time = "medium"
+                    reasoning = "Classical statistical approach, excellent for trend and seasonality modeling"
+                    pros = ["Well-established statistical foundation", "Good for trend modeling", "Provides confidence intervals", "Handles seasonality well"]
+                    cons = ["Requires stationary data", "Manual parameter tuning", "Sensitive to outliers", "Univariate only"]
+                    best_for = "Time series with clear trends and seasonal patterns, when statistical rigor is important"
+                    interpretability = "high"
+                    memory_usage = "low"
+                elif model_type == "lstm_ts":
+                    complexity = 8.0
+                    training_time = "slow"
+                    reasoning = "Deep learning approach capable of capturing complex non-linear patterns"
+                    pros = ["Captures complex patterns", "Can handle multivariate data", "No stationarity requirements", "Good for long sequences"]
+                    cons = ["Requires large datasets", "Black box model", "Computationally intensive", "Hyperparameter sensitive"]
+                    best_for = "Large datasets with complex non-linear patterns and multiple input features"
+                    interpretability = "low"
+                    memory_usage = "high"
+                elif model_type == "exponential_smoothing":
+                    complexity = 4.0
+                    training_time = "fast"
+                    reasoning = "Simple and fast method, good baseline for trend and seasonal patterns"
+                    pros = ["Very fast training", "Simple to understand", "Good baseline model", "Handles trend and seasonality"]
+                    cons = ["Limited complexity", "No external features", "Simple assumptions", "May miss complex patterns"]
+                    best_for = "Quick forecasting baseline, simple trend and seasonal patterns"
+                    interpretability = "high"
+                    memory_usage = "low"
+                elif model_type == "seasonal_decompose":
+                    complexity = 5.0
+                    training_time = "fast"
+                    reasoning = "Decomposes time series into trend, seasonal, and residual components"
+                    pros = ["Clear interpretability", "Good for exploratory analysis", "Handles seasonality well", "Fast computation"]
+                    cons = ["Simple assumptions", "Limited forecasting capability", "Requires regular patterns", "No external features"]
+                    best_for = "Understanding seasonal patterns and time series decomposition"
+                    interpretability = "high"
+                    memory_usage = "low"
+                else:
+                    # Generic fallback for any other forecasting models
+                    complexity = 5.0
+                    training_time = "medium"
+                    reasoning = f"Specialized {model_type} forecasting model for time series prediction"
+                    pros = ["Specialized for time series", "Handles temporal dependencies"]
+                    cons = ["Limited to temporal data", "May require parameter tuning"]
+                    best_for = "Time series forecasting tasks"
+                    interpretability = "medium"
+                    memory_usage = "medium"
+            else:
+                complexity = 5.0
+                training_time = "medium"
+                reasoning = "Fallback recommendation"
+                pros = []
+                cons = []
+                best_for = ""
+                interpretability = "medium"
+                memory_usage = "medium"
+
             fallback_models.append(ModelRecommendation(
                 model_type=model_type,
                 model_family=self._get_model_family(model_type),
-                complexity_score=5.0,
-                expected_training_time="medium",
+                complexity_score=complexity,
+                expected_training_time=training_time,
                 parameter_estimates={},
-                reasoning="Fallback recommendation",
+                reasoning=reasoning,
+                pros=pros,
+                cons=cons,
+                best_for=best_for,
+                interpretability=interpretability,
+                memory_usage=memory_usage,
                 architectures=self._generate_model_architectures(
-                    {"model_type": model_type, "complexity_score": 5.0, "parameter_estimates": {}},
+                    {"model_type": model_type, "complexity_score": complexity, "parameter_estimates": {}},
                     task_type,
                     (data_profile.n_rows, data_profile.n_cols)
                 )
@@ -859,7 +1088,12 @@ Consider the dataset size, feature types, missing data patterns, and business do
             "dbscan": "clustering",
             "hierarchical": "clustering",
             "spectral": "clustering",
-            "gaussian_mixture": "clustering"
+            "gaussian_mixture": "clustering",
+            "arima": "time_series",
+            "prophet": "time_series",
+            "exponential_smoothing": "time_series",
+            "lstm_ts": "time_series",
+            "seasonal_decompose": "time_series"
         }
         return family_map.get(model_type, "unknown")
     
@@ -901,6 +1135,13 @@ Consider the dataset size, feature types, missing data patterns, and business do
                 "hierarchical": {"class": AgglomerativeClustering, "regressor": None},
                 "spectral": {"class": SpectralClustering, "regressor": None},
                 "gaussian_mixture": {"class": GaussianMixture, "regressor": None}
+            },
+            "time_series": {
+                "arima": {"class": "ARIMAForecaster", "regressor": None},
+                "prophet": {"class": "ProphetForecaster", "regressor": None},
+                "exponential_smoothing": {"class": "ExponentialSmoothing", "regressor": None},
+                "lstm_ts": {"class": "LSTMTimeSeriesModel", "regressor": None},
+                "seasonal_decompose": {"class": "SeasonalDecompose", "regressor": None}
             }
         }
         

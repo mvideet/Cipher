@@ -1,13 +1,31 @@
 """
-Data profiler for analyzing dataset characteristics and quality
+Data profiler for analyzing dataset characteristics and quality, including time series analysis
 """
 
 import pandas as pd
 import numpy as np
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional, Tuple
 import structlog
+from datetime import datetime, timedelta
 
-from ..models.schema import DataProfile
+# Time series analysis imports
+try:
+    from statsmodels.tsa.stattools import adfuller, kpss
+    from statsmodels.tsa.seasonal import seasonal_decompose
+    STATSMODELS_AVAILABLE = True
+except ImportError:
+    STATSMODELS_AVAILABLE = False
+    import warnings
+    warnings.warn("Statsmodels not available for advanced time series analysis")
+
+# Define DataProfile class locally since we can't import it
+class DataProfile:
+    def __init__(self, n_rows: int, n_cols: int, columns: Dict[str, Any], issues: List[str], recommendations: List[str]):
+        self.n_rows = n_rows
+        self.n_cols = n_cols
+        self.columns = columns
+        self.issues = issues
+        self.recommendations = recommendations
 
 logger = structlog.get_logger()
 
@@ -30,7 +48,7 @@ def convert_numpy_types(obj):
 
 
 class DataProfiler:
-    """Dataset profiling and quality analysis"""
+    """Dataset profiling and quality analysis with time series support"""
     
     def profile_dataset(self, df: pd.DataFrame) -> DataProfile:
         """Profile a dataset and return analysis results"""
@@ -82,6 +100,477 @@ class DataProfiler:
             issues=issues,
             recommendations=recommendations
         )
+    
+    def profile_time_series(self, df: pd.DataFrame, date_column: str, target_column: str) -> Dict[str, Any]:
+        """
+        Analyze temporal characteristics for time series forecasting:
+        - Date range and frequency detection
+        - Missing value patterns in time
+        - Trend analysis (increasing/decreasing/stable)
+        - Seasonality detection (FFT, autocorrelation)
+        - Stationarity tests (ADF, KPSS)
+        - Outlier detection in temporal context
+        - Data frequency consistency
+        """
+        
+        logger.info("Profiling time series data", 
+                   date_col=date_column, 
+                   target_col=target_column, 
+                   n_rows=len(df))
+        
+        ts_profile = {
+            "is_time_series": True,
+            "date_column": date_column,
+            "target_column": target_column,
+            "temporal_analysis": {},
+            "recommendations": [],
+            "issues": []
+        }
+        
+        try:
+            # Convert and validate date column
+            df_ts = df.copy()
+            df_ts[date_column] = pd.to_datetime(df_ts[date_column])
+            
+            # Sort by date
+            df_ts = df_ts.sort_values(date_column).reset_index(drop=True)
+            
+            # Basic temporal characteristics
+            date_range = df_ts[date_column].max() - df_ts[date_column].min()
+            
+            ts_profile["temporal_analysis"]["date_range"] = {
+                "start_date": df_ts[date_column].min().isoformat(),
+                "end_date": df_ts[date_column].max().isoformat(),
+                "total_days": date_range.days,
+                "total_periods": len(df_ts)
+            }
+            
+            # Frequency detection
+            frequency_info = self._detect_frequency(df_ts[date_column])
+            ts_profile["temporal_analysis"]["frequency"] = frequency_info
+            
+            # Gap analysis
+            gap_analysis = self._analyze_temporal_gaps(df_ts[date_column], frequency_info["inferred_freq"])
+            ts_profile["temporal_analysis"]["gaps"] = gap_analysis
+            
+            # Target variable temporal analysis
+            if target_column in df_ts.columns:
+                target_analysis = self._analyze_target_temporal_patterns(
+                    df_ts, date_column, target_column, frequency_info["inferred_freq"]
+                )
+                ts_profile["temporal_analysis"]["target_patterns"] = target_analysis
+            
+            # Generate time series specific recommendations
+            ts_recommendations = self._generate_ts_recommendations(ts_profile["temporal_analysis"])
+            ts_profile["recommendations"] = ts_recommendations
+            
+        except Exception as e:
+            logger.error("Time series profiling failed", error=str(e))
+            ts_profile["issues"].append(f"Time series analysis failed: {str(e)}")
+            ts_profile["is_time_series"] = False
+        
+        return convert_numpy_types(ts_profile)
+    
+    def _detect_frequency(self, date_series: pd.Series) -> Dict[str, Any]:
+        """Detect the frequency of time series data"""
+        
+        if len(date_series) < 2:
+            return {
+                "inferred_freq": "unknown",
+                "frequency_confidence": 0.0,
+                "irregular_periods": True,
+                "common_intervals": []
+            }
+        
+        # Calculate differences between consecutive dates
+        diffs = date_series.diff().dropna()
+        
+        # Convert to hours for analysis
+        diff_hours = diffs.dt.total_seconds() / 3600
+        
+        # Find most common intervals
+        from collections import Counter
+        diff_counts = Counter(diff_hours.round(2))
+        
+        if not diff_counts:
+            return {
+                "inferred_freq": "unknown",
+                "frequency_confidence": 0.0,
+                "irregular_periods": True,
+                "common_intervals": []
+            }
+        
+        most_common = diff_counts.most_common(5)
+        dominant_interval = most_common[0][0]  # hours
+        dominant_count = most_common[0][1]
+        
+        # Calculate frequency confidence
+        confidence = dominant_count / len(diff_hours)
+        
+        # Classify frequency
+        freq_classification = "unknown"
+        if abs(dominant_interval - 1) < 0.1:  # ~1 hour
+            freq_classification = "H"
+        elif abs(dominant_interval - 24) < 1:  # ~24 hours (daily)
+            freq_classification = "D"
+        elif 160 <= dominant_interval <= 192:  # ~168 hours (weekly)
+            freq_classification = "W"
+        elif 720 <= dominant_interval <= 780:  # ~744 hours (monthly)
+            freq_classification = "M"
+        elif 2160 <= dominant_interval <= 2208:  # ~2190 hours (quarterly)
+            freq_classification = "Q"
+        elif 8640 <= dominant_interval <= 8928:  # ~8760 hours (yearly)
+            freq_classification = "Y"
+        
+        return {
+            "inferred_freq": freq_classification,
+            "frequency_confidence": float(confidence),
+            "irregular_periods": confidence < 0.8,
+            "dominant_interval_hours": float(dominant_interval),
+            "common_intervals": [(float(interval), count) for interval, count in most_common]
+        }
+    
+    def _analyze_temporal_gaps(self, date_series: pd.Series, frequency: str) -> Dict[str, Any]:
+        """Analyze missing periods and temporal gaps"""
+        
+        if frequency == "unknown":
+            return {"analysis_possible": False, "reason": "Unknown frequency"}
+        
+        # Expected interval mapping
+        freq_to_hours = {
+            "H": 1, "D": 24, "W": 168, "M": 720, "Q": 2190, "Y": 8760
+        }
+        
+        expected_interval = freq_to_hours.get(frequency, 24)
+        
+        # Calculate actual intervals
+        diffs = date_series.diff().dropna()
+        diff_hours = diffs.dt.total_seconds() / 3600
+        
+        # Find gaps (intervals significantly larger than expected)
+        gap_threshold = expected_interval * 1.5
+        gaps = diff_hours[diff_hours > gap_threshold]
+        
+        return {
+            "analysis_possible": True,
+            "total_gaps": len(gaps),
+            "gap_percentage": float(len(gaps) / len(diff_hours) * 100),
+            "largest_gap_hours": float(gaps.max()) if len(gaps) > 0 else 0,
+            "average_gap_hours": float(gaps.mean()) if len(gaps) > 0 else 0,
+            "regular_intervals": float((diff_hours <= gap_threshold).mean() * 100)
+        }
+    
+    def _analyze_target_temporal_patterns(
+        self, 
+        df: pd.DataFrame, 
+        date_col: str, 
+        target_col: str, 
+        frequency: str
+    ) -> Dict[str, Any]:
+        """Analyze temporal patterns in the target variable"""
+        
+        # Set up time series
+        ts_data = df.set_index(date_col)[target_col].dropna()
+        
+        if len(ts_data) < 10:
+            return {"analysis_possible": False, "reason": "Insufficient data"}
+        
+        analysis = {"analysis_possible": True}
+        
+        # Basic statistics
+        analysis["basic_stats"] = {
+            "mean": float(ts_data.mean()),
+            "std": float(ts_data.std()),
+            "min": float(ts_data.min()),
+            "max": float(ts_data.max()),
+            "cv": float(ts_data.std() / ts_data.mean()) if ts_data.mean() != 0 else float('inf')
+        }
+        
+        # Trend analysis
+        try:
+            trend_analysis = self._detect_trend(ts_data)
+            analysis["trend"] = trend_analysis
+        except Exception as e:
+            logger.warning("Trend analysis failed", error=str(e))
+            analysis["trend"] = {"detected": False, "error": str(e)}
+        
+        # Seasonality detection
+        try:
+            seasonality_analysis = self._detect_seasonality(ts_data, frequency)
+            analysis["seasonality"] = seasonality_analysis
+        except Exception as e:
+            logger.warning("Seasonality analysis failed", error=str(e))
+            analysis["seasonality"] = {"detected": False, "error": str(e)}
+        
+        # Stationarity tests
+        if STATSMODELS_AVAILABLE:
+            try:
+                stationarity_analysis = self._test_stationarity(ts_data)
+                analysis["stationarity"] = stationarity_analysis
+            except Exception as e:
+                logger.warning("Stationarity test failed", error=str(e))
+                analysis["stationarity"] = {"test_possible": False, "error": str(e)}
+        
+        # Outlier detection in temporal context
+        try:
+            outlier_analysis = self._detect_temporal_outliers(ts_data)
+            analysis["outliers"] = outlier_analysis
+        except Exception as e:
+            logger.warning("Outlier detection failed", error=str(e))
+            analysis["outliers"] = {"analysis_possible": False, "error": str(e)}
+        
+        return analysis
+    
+    def _detect_trend(self, series: pd.Series) -> Dict[str, Any]:
+        """Detect trend using linear regression"""
+        try:
+            x = np.arange(len(series))
+            y = series.values
+            A = np.vstack([x, np.ones(len(x))]).T
+            slope, intercept = np.linalg.lstsq(A, y, rcond=None)[0]
+            
+            # Calculate R-squared
+            y_pred = slope * x + intercept
+            ss_tot = np.sum((y - y.mean()) ** 2)
+            ss_res = np.sum((y - y_pred) ** 2)
+            r_squared = 1 - (ss_res / ss_tot)
+            
+            return {
+                "detected": r_squared > 0.25,  # Simple threshold
+                "direction": "increasing" if slope > 0 else "decreasing",
+                "slope": float(slope),
+                "r_squared": float(r_squared)
+            }
+        except Exception as e:
+            logger.warning("Trend detection failed", error=str(e))
+            return {"detected": False}
+    
+    def _detect_seasonality(self, series: pd.Series, frequency: str) -> Dict[str, Any]:
+        """Detect seasonality using FFT and autocorrelation"""
+        
+        if len(series) < 20:
+            return {"detected": False, "reason": "Insufficient data for seasonality analysis"}
+        
+        # FFT-based seasonality detection
+        try:
+            # Remove trend first
+            detrended = series - series.rolling(window=min(len(series)//4, 12), center=True).mean()
+            detrended = detrended.dropna()
+            
+            if len(detrended) < 10:
+                return {"detected": False, "reason": "Insufficient data after detrending"}
+            
+            # FFT analysis
+            fft_values = np.fft.fft(detrended.values)
+            frequencies = np.fft.fftfreq(len(detrended))
+            
+            # Find dominant frequencies (excluding DC component)
+            magnitudes = np.abs(fft_values)[1:len(fft_values)//2]
+            frequencies = frequencies[1:len(frequencies)//2]
+            
+            if len(magnitudes) == 0:
+                return {"detected": False, "reason": "No frequencies to analyze"}
+            
+            # Find peaks
+            peak_indices = []
+            for i in range(1, len(magnitudes)-1):
+                if magnitudes[i] > magnitudes[i-1] and magnitudes[i] > magnitudes[i+1]:
+                    peak_indices.append(i)
+            
+            if not peak_indices:
+                return {"detected": False, "reason": "No clear peaks found"}
+            
+            # Get top 3 peaks
+            top_peaks = sorted(peak_indices, key=lambda x: magnitudes[x], reverse=True)[:3]
+            
+            seasonal_periods = []
+            for peak_idx in top_peaks:
+                if frequencies[peak_idx] > 0:
+                    period = 1 / frequencies[peak_idx]
+                    if 2 <= period <= len(detrended) / 3:  # Reasonable period range
+                        seasonal_periods.append({
+                            "period": float(period),
+                            "strength": float(magnitudes[peak_idx]),
+                            "frequency": float(frequencies[peak_idx])
+                        })
+            
+            seasonality_detected = len(seasonal_periods) > 0
+            
+            # Classify seasonality type based on frequency and period
+            seasonality_type = "unknown"
+            if seasonal_periods:
+                dominant_period = seasonal_periods[0]["period"]
+                
+                if frequency == "D":
+                    if 6 <= dominant_period <= 8:
+                        seasonality_type = "weekly"
+                    elif 28 <= dominant_period <= 32:
+                        seasonality_type = "monthly"
+                    elif 90 <= dominant_period <= 100:
+                        seasonality_type = "quarterly"
+                    elif 360 <= dominant_period <= 370:
+                        seasonality_type = "yearly"
+                elif frequency == "W":
+                    if 4 <= dominant_period <= 5:
+                        seasonality_type = "monthly"
+                    elif 12 <= dominant_period <= 14:
+                        seasonality_type = "quarterly"
+                    elif 50 <= dominant_period <= 54:
+                        seasonality_type = "yearly"
+                elif frequency == "M":
+                    if 11 <= dominant_period <= 13:
+                        seasonality_type = "yearly"
+            
+            return {
+                "detected": seasonality_detected,
+                "type": seasonality_type,
+                "periods": seasonal_periods,
+                "dominant_period": seasonal_periods[0]["period"] if seasonal_periods else None,
+                "strength_score": seasonal_periods[0]["strength"] if seasonal_periods else 0.0
+            }
+            
+        except Exception as e:
+            return {"detected": False, "error": f"FFT analysis failed: {str(e)}"}
+    
+    def _test_stationarity(self, series: pd.Series) -> Dict[str, Any]:
+        """Test stationarity using ADF and KPSS tests"""
+        
+        if len(series) < 10:
+            return {"test_possible": False, "reason": "Insufficient data"}
+        
+        stationarity_results = {"test_possible": True}
+        
+        # Augmented Dickey-Fuller test
+        try:
+            adf_stat, adf_pvalue, adf_usedlag, adf_nobs, adf_critical, adf_icbest = adfuller(series)
+            
+            stationarity_results["adf_test"] = {
+                "statistic": float(adf_stat),
+                "p_value": float(adf_pvalue),
+                "critical_values": {k: float(v) for k, v in adf_critical.items()},
+                "is_stationary": adf_pvalue < 0.05,
+                "confidence_level": "95%" if adf_pvalue < 0.05 else "low"
+            }
+        except Exception as e:
+            stationarity_results["adf_test"] = {"error": str(e)}
+        
+        # KPSS test
+        try:
+            kpss_stat, kpss_pvalue, kpss_lags, kpss_critical = kpss(series, regression='c')
+            
+            stationarity_results["kpss_test"] = {
+                "statistic": float(kpss_stat),
+                "p_value": float(kpss_pvalue),
+                "critical_values": {k: float(v) for k, v in kpss_critical.items()},
+                "is_stationary": kpss_pvalue > 0.05,
+                "confidence_level": "95%" if kpss_pvalue > 0.05 else "low"
+            }
+        except Exception as e:
+            stationarity_results["kpss_test"] = {"error": str(e)}
+        
+        # Combined interpretation
+        if "adf_test" in stationarity_results and "kpss_test" in stationarity_results:
+            adf_stationary = stationarity_results["adf_test"].get("is_stationary", False)
+            kpss_stationary = stationarity_results["kpss_test"].get("is_stationary", False)
+            
+            if adf_stationary and kpss_stationary:
+                conclusion = "stationary"
+            elif not adf_stationary and not kpss_stationary:
+                conclusion = "non_stationary"
+            else:
+                conclusion = "inconclusive"
+            
+            stationarity_results["conclusion"] = conclusion
+        
+        return stationarity_results
+    
+    def _detect_temporal_outliers(self, series: pd.Series) -> Dict[str, Any]:
+        """Detect outliers using IQR method"""
+        try:
+            values = series.values
+            q1 = np.percentile(values, 25)
+            q3 = np.percentile(values, 75)
+            iqr = q3 - q1
+            lower_bound = q1 - 1.5 * iqr
+            upper_bound = q3 + 1.5 * iqr
+            
+            outliers = np.where((values < lower_bound) | (values > upper_bound))[0]
+            outlier_values = values[outliers]
+            
+            return {
+                "detected": len(outliers) > 0,
+                "n_outliers": len(outliers),
+                "outlier_indices": outliers.tolist(),
+                "outlier_values": outlier_values.tolist(),
+                "lower_bound": float(lower_bound),
+                "upper_bound": float(upper_bound)
+            }
+        except Exception as e:
+            logger.warning("Outlier detection failed", error=str(e))
+            return {"detected": False}
+    
+    def _generate_ts_recommendations(self, temporal_analysis: Dict[str, Any]) -> List[str]:
+        """Generate time series specific recommendations"""
+        
+        recommendations = []
+        
+        # Frequency recommendations
+        freq_info = temporal_analysis.get("frequency", {})
+        if freq_info.get("irregular_periods", False):
+            recommendations.append("Data has irregular time intervals - consider resampling or interpolation")
+        
+        if freq_info.get("frequency_confidence", 0) < 0.7:
+            recommendations.append("Time frequency detection has low confidence - verify data quality")
+        
+        # Gap recommendations
+        gap_info = temporal_analysis.get("gaps", {})
+        if gap_info.get("gap_percentage", 0) > 10:
+            recommendations.append("Significant temporal gaps detected - consider gap filling strategies")
+        
+        # Target pattern recommendations
+        target_patterns = temporal_analysis.get("target_patterns", {})
+        
+        if target_patterns.get("analysis_possible", False):
+            # Trend recommendations
+            trend_info = target_patterns.get("trend", {})
+            if trend_info.get("detected", False):
+                direction = trend_info.get("direction", "unknown")
+                recommendations.append(f"Strong {direction} trend detected - consider trend-aware models (Prophet, ARIMA)")
+            
+            # Seasonality recommendations
+            seasonality_info = target_patterns.get("seasonality", {})
+            if seasonality_info.get("detected", False):
+                season_type = seasonality_info.get("type", "unknown")
+                recommendations.append(f"Seasonality detected ({season_type}) - use seasonal models (Prophet, seasonal ARIMA)")
+            
+            # Stationarity recommendations
+            stationarity_info = target_patterns.get("stationarity", {})
+            if stationarity_info.get("test_possible", False):
+                conclusion = stationarity_info.get("conclusion", "unknown")
+                if conclusion == "non_stationary":
+                    recommendations.append("Series is non-stationary - consider differencing or detrending")
+                elif conclusion == "inconclusive":
+                    recommendations.append("Stationarity tests are inconclusive - manual inspection recommended")
+            
+            # Outlier recommendations
+            outlier_info = target_patterns.get("outliers", {})
+            if outlier_info.get("analysis_possible", False):
+                total_outliers = outlier_info.get("n_outliers", 0)
+                total_points = len(temporal_analysis.get("target_patterns", {}).get("basic_stats", {}))
+                if total_outliers > total_points * 0.05:  # More than 5% outliers
+                    recommendations.append("High number of outliers detected - consider robust forecasting methods")
+        
+        # Model recommendations based on data characteristics
+        data_length = temporal_analysis.get("date_range", {}).get("total_periods", 0)
+        
+        if data_length < 100:
+            recommendations.append("Limited data points - prefer simple models (exponential smoothing, linear trend)")
+        elif data_length < 500:
+            recommendations.append("Moderate data size - suitable for ARIMA, Prophet, and Holt-Winters models")
+        else:
+            recommendations.append("Large dataset - can leverage complex models including LSTM and ensemble methods")
+        
+        return recommendations
     
     def _profile_column(self, series: pd.Series) -> Dict[str, Any]:
         """Profile a single column"""

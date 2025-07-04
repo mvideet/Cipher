@@ -27,6 +27,13 @@ requests>=2.31.0
 # Additional ML libraries
 catboost>=1.2.0
 
+# Time Series Forecasting Libraries
+statsmodels>=0.14.0
+prophet>=1.1.4
+scipy>=1.11.0
+torch>=2.0.0
+pmdarima>=2.0.0
+
 # PyTorch removed from requirements
 
 # Development dependencies (optional)

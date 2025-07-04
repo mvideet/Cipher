@@ -687,9 +687,20 @@ async def get_model_recommendations(
             
             # Format recommendations for frontend
             recommendations = []
+            model_type_counters = {}  # Track count per model type for unique IDs
+            
             for model_rec in ensemble_strategy.recommended_models:
+                # Generate deterministic ID based on model type, not array position
+                model_type = model_rec.model_type
+                if model_type not in model_type_counters:
+                    model_type_counters[model_type] = 0
+                else:
+                    model_type_counters[model_type] += 1
+                
+                model_id = f"{model_type}_{model_type_counters[model_type]}"
+                
                 recommendations.append({
-                    "id": f"{model_rec.model_type}_{len(recommendations)}",
+                    "id": model_id,
                     "model_type": model_rec.model_type,
                     "model_family": model_rec.model_family,
                     "name": model_rec.model_type.replace("_", " ").title(),
@@ -890,36 +901,84 @@ async def _run_enhanced_training_with_selection(
                    data_profile_rows=data_profile.n_rows,
                    data_profile_cols=data_profile.n_cols)
         
-        # Use enhanced trainer with proper model selection
-        from ..ml.enhanced_trainer import EnhancedTrainingOrchestrator
-        trainer = EnhancedTrainingOrchestrator(run_id, session_id, websocket_manager_instance)
+        # Route to appropriate trainer based on task type
+        if task_type == "forecasting":
+            # Use time series trainer for forecasting tasks
+            from ..ml.timeseries_trainer import TimeSeriesTrainer
+            trainer = TimeSeriesTrainer(run_id, session_id, websocket_manager_instance)
+        else:
+            # Use enhanced trainer for classification/regression tasks
+            from ..ml.enhanced_trainer import EnhancedTrainingOrchestrator
+            trainer = EnhancedTrainingOrchestrator(run_id, session_id, websocket_manager_instance)
         
         # Convert frontend model IDs to backend model types
         model_type_mapping = {
+            # Classification/Regression models
             "linear_regression": "linear_regression",
             "logistic_regression": "logistic_regression", 
             "random_forest": "random_forest",
             "xgboost": "xgboost",
             "lightgbm": "lightgbm",
+            "catboost": "catboost",
+            "hist_gradient_boosting": "hist_gradient_boosting",
             "neural_network": "neural_network",
             "svm": "svm",
             "naive_bayes": "naive_bayes",
-            "knn": "knn"
+            "knn": "knn",
+            "extra_trees": "extra_trees",
+            
+            # Time Series Forecasting models
+            "arima": "arima",
+            "prophet": "prophet",
+            "exponential_smoothing": "exponential_smoothing",
+            "lstm_ts": "lstm_ts",
+            "seasonal_decompose": "seasonal_decompose",
+            
+            # Clustering models
+            "kmeans": "kmeans",
+            "dbscan": "dbscan",
+            "hierarchical": "hierarchical",
+            "spectral": "spectral",
+            "gaussian_mixture": "gaussian_mixture",
+            
+            # Anomaly detection
+            "isolation_forest": "isolation_forest"
         }
         
         # Extract model types from selected model IDs
         selected_model_types = []
         for model_id in selected_models:
-            # Extract base model type from ID (remove suffixes like "_0", "_1", etc.)
-            base_type = model_id.split('_')[0] + '_' + model_id.split('_')[1] if '_' in model_id else model_id
+            # Extract base model type from ID (remove numeric suffixes like "_0", "_1", etc.)
+            # Handle cases like "arima_1", "prophet_0", "random_forest_2", "exponential_smoothing_1"
+            
+            # First, try exact match
+            if model_id in model_type_mapping:
+                selected_model_types.append(model_type_mapping[model_id])
+                continue
+            
+            # Remove trailing numbers to get base type (e.g., "arima_1" -> "arima")
+            import re
+            base_type = re.sub(r'_\d+$', '', model_id)
+            
             if base_type in model_type_mapping:
                 selected_model_types.append(model_type_mapping[base_type])
             else:
-                # Try to match partial names
-                for frontend_name, backend_name in model_type_mapping.items():
-                    if frontend_name in model_id.lower():
-                        selected_model_types.append(backend_name)
-                        break
+                # For compound names like "exponential_smoothing_1", try the full compound name
+                # Split and check if it's a multi-word model type
+                parts = model_id.split('_')
+                if len(parts) > 2:
+                    # Try combinations like "exponential_smoothing" from "exponential_smoothing_1"
+                    for i in range(len(parts)-1, 0, -1):
+                        compound_type = '_'.join(parts[:i])
+                        if compound_type in model_type_mapping:
+                            selected_model_types.append(model_type_mapping[compound_type])
+                            break
+                else:
+                    # Fallback: try partial matching
+                    for frontend_name, backend_name in model_type_mapping.items():
+                        if frontend_name in model_id.lower():
+                            selected_model_types.append(backend_name)
+                            break
         
         logger.info("🔍 Mapped selected models", 
                    frontend_ids=selected_models, 
@@ -936,39 +995,99 @@ async def _run_enhanced_training_with_selection(
         # Send initial progress update
         await websocket_manager_instance.broadcast_training_status(session_id, {
             "event": "training_started",
-            "message": f"Starting enhanced training with {len(selected_model_types)} model types",
+            "message": f"Starting training with {len(selected_model_types)} model types",
             "selected_models": selected_model_types,
             "progress": 0
         })
         
-        result = await trainer.train_ensemble_models(
-            dataset_path=dataset_path,
-            target_col=target_col,
-            task_type=task_type,
-            metric=metric,
-            constraints=enhanced_constraints,
-            data_profile=data_profile
-        )
+        # Call appropriate training method based on task type
+        if task_type == "forecasting":
+            # For forecasting, we need to detect the date column
+            df = pd.read_csv(dataset_path)
+            date_columns = []
+            for col in df.columns:
+                if col.lower() in ['date', 'time', 'timestamp', 'datetime'] or df[col].dtype == 'datetime64[ns]':
+                    date_columns.append(col)
+            
+            if not date_columns:
+                # Try to detect date columns by attempting to parse them
+                for col in df.columns:
+                    if col != target_col and df[col].dtype == 'object':
+                        try:
+                            pd.to_datetime(df[col].head(10))
+                            date_columns.append(col)
+                            break
+                        except:
+                            continue
+            
+            if not date_columns:
+                raise ValueError("No date column found for time series forecasting")
+            
+            date_column = date_columns[0]
+            forecast_horizon = enhanced_constraints.get("forecast_horizon", 30)
+            
+            # Add selected models to constraints for time series trainer
+            enhanced_constraints["selected_models"] = selected_model_types
+            
+            result = await trainer.train_forecast_models(
+                dataset_path=dataset_path,
+                date_column=date_column,
+                target_column=target_col,
+                forecast_horizon=forecast_horizon,
+                data_profile=data_profile,
+                constraints=enhanced_constraints
+            )
+        else:
+            result = await trainer.train_ensemble_models(
+                dataset_path=dataset_path,
+                target_col=target_col,
+                task_type=task_type,
+                metric=metric,
+                constraints=enhanced_constraints,
+                data_profile=data_profile
+            )
         
-        logger.info("✅ Enhanced training completed successfully with user selection", 
-                   run_id=run_id,
-                   final_score=f"{result.val_score:.4f}",
-                   best_model_family=result.family,
-                   train_score=f"{result.train_score:.4f}")
-        
-        # Send completion notification
-        await websocket_manager_instance.broadcast_training_complete(session_id, {
-            "enhanced_results": True,  # Mark as enhanced since we used enhanced trainer
-            "run_id": run_id,
-            "best_model": {
-                "family": result.family,
-                "val_score": result.val_score,
-                "train_score": result.train_score
-            },
-            "model_path": result.model_path,
-            "selected_models": selected_model_types,
-            "ensemble_method": "user_selected"
-        })
+        if task_type == "forecasting":
+            # Time series trainer returns ModelArtifact with different format
+            logger.info("✅ Time series training completed successfully with user selection", 
+                       run_id=run_id,
+                       best_model_type=result.model_type,
+                       performance_metrics=result.performance_metrics)
+            
+            # Send completion notification for time series
+            await websocket_manager_instance.broadcast_training_complete(session_id, {
+                "forecasting_results": True,  # Mark as forecasting
+                "run_id": run_id,
+                "best_model": {
+                    "family": result.model_type,
+                    "model_type": result.model_type,
+                    "performance_metrics": result.performance_metrics
+                },
+                "model_path": result.model_path,
+                "selected_models": selected_model_types,
+                "training_method": "time_series_forecasting"
+            })
+        else:
+            # Enhanced trainer returns ensemble results
+            logger.info("✅ Enhanced training completed successfully with user selection", 
+                       run_id=run_id,
+                       final_score=f"{result.val_score:.4f}",
+                       best_model_family=result.family,
+                       train_score=f"{result.train_score:.4f}")
+            
+            # Send completion notification
+            await websocket_manager_instance.broadcast_training_complete(session_id, {
+                "enhanced_results": True,  # Mark as enhanced since we used enhanced trainer
+                "run_id": run_id,
+                "best_model": {
+                    "family": result.family,
+                    "val_score": result.val_score,
+                    "train_score": result.train_score
+                },
+                "model_path": result.model_path,
+                "selected_models": selected_model_types,
+                "ensemble_method": "user_selected"
+            })
         
         logger.info("🎉 Training completion notification sent", 
                    session_id=session_id, 

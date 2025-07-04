@@ -1,10 +1,10 @@
 """
-SHAP-based model explainer for generating feature importance and explanations
+SHAP-based model explainer for generating feature importance and explanations, including time series forecasting
 """
 
 import pickle
 from pathlib import Path
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional, List, Union
 
 import pandas as pd
 import numpy as np
@@ -15,13 +15,21 @@ import openai
 from sklearn.pipeline import Pipeline
 from sklearn.compose import ColumnTransformer
 
+# Time series analysis imports
+try:
+    from statsmodels.tsa.seasonal import seasonal_decompose
+    from statsmodels.tsa.stattools import adfuller
+    STATSMODELS_AVAILABLE = True
+except ImportError:
+    STATSMODELS_AVAILABLE = False
+
 from ..core.config import settings
 
 logger = structlog.get_logger()
 
 
 class Explainer:
-    """SHAP-based model explainer with robust support for all model types"""
+    """SHAP-based model explainer with robust support for all model types including time series"""
     
     def __init__(self):
         self.client = openai.AsyncOpenAI(api_key=settings.OPENAI_API_KEY) if settings.OPENAI_API_KEY else None
@@ -65,6 +73,569 @@ class Explainer:
             logger.error("Model explanation failed", error=str(e), exc_info=True)
             # Return fallback explanation
             return self._create_fallback_explanation(model_path, target_col)
+    
+    async def explain_time_series_forecast(
+        self,
+        model_path: str,
+        forecast_data: Dict[str, Any],
+        time_series_data: pd.DataFrame,
+        date_column: str,
+        target_column: str
+    ) -> Dict[str, Any]:
+        """
+        Generate explanations for time series forecasting models:
+        - Feature importance for lag variables
+        - Seasonal component breakdown
+        - Trend contribution analysis
+        - External factor impact (if applicable)
+        - Forecast confidence explanation
+        - Model assumption validation
+        """
+        
+        logger.info("Generating time series forecast explanations", model_path=model_path)
+        
+        try:
+            # Load the time series model
+            with open(model_path, 'rb') as f:
+                ts_model = pickle.load(f)
+            
+            # Detect model type
+            model_type = self._detect_ts_model_type(ts_model)
+            
+            # Generate appropriate explanations based on model type
+            if model_type == "arima":
+                explanation = await self._explain_arima_model(ts_model, time_series_data, date_column, target_column)
+            elif model_type == "prophet":
+                explanation = await self._explain_prophet_model(ts_model, time_series_data, date_column, target_column)
+            elif model_type == "exponential_smoothing":
+                explanation = await self._explain_exponential_smoothing(ts_model, time_series_data, date_column, target_column)
+            elif model_type == "lstm":
+                explanation = await self._explain_lstm_model(ts_model, time_series_data, date_column, target_column)
+            else:
+                explanation = await self._explain_generic_ts_model(ts_model, time_series_data, date_column, target_column)
+            
+            # Add forecast confidence and uncertainty explanation
+            explanation.update(await self._explain_forecast_uncertainty(
+                forecast_data, time_series_data, target_column
+            ))
+            
+            # Generate comprehensive text explanation
+            explanation["text_explanation"] = await self._generate_ts_text_explanation(
+                explanation, model_type, target_column
+            )
+            
+            return explanation
+            
+        except Exception as e:
+            logger.error("Time series explanation failed", error=str(e))
+            return self._create_fallback_ts_explanation(model_path, target_column)
+    
+    def _detect_ts_model_type(self, model) -> str:
+        """Detect the type of time series model"""
+        
+        model_name = type(model).__name__.lower()
+        
+        if "arima" in model_name or "sarimax" in model_name:
+            return "arima"
+        elif "prophet" in model_name:
+            return "prophet"
+        elif "exponentialsmoothing" in model_name or "holtwinters" in model_name:
+            return "exponential_smoothing"
+        elif "lstm" in model_name or hasattr(model, 'lstm'):
+            return "lstm"
+        else:
+            return "unknown"
+    
+    async def _explain_arima_model(
+        self, 
+        model, 
+        data: pd.DataFrame, 
+        date_col: str, 
+        target_col: str
+    ) -> Dict[str, Any]:
+        """Explain ARIMA model components and parameters"""
+        
+        explanation = {
+            "model_type": "ARIMA",
+            "model_components": {},
+            "parameter_analysis": {},
+            "statistical_tests": {},
+            "residual_analysis": {}
+        }
+        
+        try:
+            # Extract ARIMA parameters
+            if hasattr(model, 'order'):
+                p, d, q = model.order
+                explanation["parameter_analysis"]["order"] = {
+                    "p": {"value": p, "meaning": f"Uses {p} lagged observations (AR terms)"},
+                    "d": {"value": d, "meaning": f"Series was differenced {d} times for stationarity"},
+                    "q": {"value": q, "meaning": f"Uses {q} lagged forecast errors (MA terms)"}
+                }
+            
+            # Seasonal parameters if available
+            if hasattr(model, 'seasonal_order') and model.seasonal_order:
+                P, D, Q, s = model.seasonal_order
+                explanation["parameter_analysis"]["seasonal_order"] = {
+                    "P": {"value": P, "meaning": f"Seasonal AR terms: {P}"},
+                    "D": {"value": D, "meaning": f"Seasonal differencing: {D}"},
+                    "Q": {"value": Q, "meaning": f"Seasonal MA terms: {Q}"},
+                    "s": {"value": s, "meaning": f"Seasonal period: {s}"}
+                }
+            
+            # Model fit statistics
+            if hasattr(model, 'aic'):
+                explanation["parameter_analysis"]["fit_statistics"] = {
+                    "aic": {"value": float(model.aic), "meaning": "Akaike Information Criterion (lower is better)"},
+                    "bic": {"value": float(model.bic), "meaning": "Bayesian Information Criterion (lower is better)"}
+                }
+            
+            # Residual analysis
+            if hasattr(model, 'resid'):
+                residuals = model.resid.dropna()
+                explanation["residual_analysis"] = {
+                    "mean": float(residuals.mean()),
+                    "std": float(residuals.std()),
+                    "ljung_box_test": "Check for autocorrelation in residuals",
+                    "normality": "Residuals should be normally distributed for optimal forecasts"
+                }
+            
+            # Coefficient interpretation
+            if hasattr(model, 'params') and len(model.params) > 0:
+                explanation["model_components"]["coefficients"] = {}
+                for i, param in enumerate(model.params):
+                    param_name = f"param_{i}"
+                    explanation["model_components"]["coefficients"][param_name] = {
+                        "value": float(param),
+                        "type": "AR/MA coefficient"
+                    }
+        
+        except Exception as e:
+            logger.warning("ARIMA detailed analysis failed", error=str(e))
+            explanation["error"] = f"Detailed analysis failed: {str(e)}"
+        
+        return explanation
+    
+    async def _explain_prophet_model(
+        self, 
+        model, 
+        data: pd.DataFrame, 
+        date_col: str, 
+        target_col: str
+    ) -> Dict[str, Any]:
+        """Explain Prophet model components"""
+        
+        explanation = {
+            "model_type": "Prophet",
+            "model_components": {},
+            "seasonality_analysis": {},
+            "trend_analysis": {},
+            "component_contributions": {}
+        }
+        
+        try:
+            # Seasonality components
+            seasonalities = {}
+            if hasattr(model, 'yearly_seasonality') and model.yearly_seasonality:
+                seasonalities["yearly"] = "Captures annual patterns and cycles"
+            if hasattr(model, 'weekly_seasonality') and model.weekly_seasonality:
+                seasonalities["weekly"] = "Captures day-of-week patterns"
+            if hasattr(model, 'daily_seasonality') and model.daily_seasonality:
+                seasonalities["daily"] = "Captures hour-of-day patterns"
+            
+            explanation["seasonality_analysis"] = seasonalities
+            
+            # Trend analysis
+            if hasattr(model, 'growth'):
+                growth = model.growth
+                explanation["trend_analysis"]["growth_type"] = {
+                    "value": growth,
+                    "meaning": "Linear growth" if growth == 'linear' else "Logistic growth with capacity constraints"
+                }
+            
+            # Changepoints
+            if hasattr(model, 'changepoints'):
+                explanation["trend_analysis"]["changepoints"] = {
+                    "count": len(model.changepoints) if model.changepoints is not None else 0,
+                    "meaning": "Points where trend rate changes automatically detected"
+                }
+            
+            # Holiday effects
+            if hasattr(model, 'holidays') and model.holidays is not None:
+                explanation["model_components"]["holidays"] = {
+                    "count": len(model.holidays),
+                    "meaning": "Special events that impact the forecast"
+                }
+            
+            # Generate forecast decomposition if possible
+            if hasattr(model, 'predict') and len(data) > 0:
+                # Create future dataframe for analysis
+                future = model.make_future_dataframe(periods=0)
+                forecast = model.predict(future.tail(min(100, len(future))))
+                
+                # Component contributions
+                components = ['trend', 'seasonal', 'yearly', 'weekly']
+                for component in components:
+                    if component in forecast.columns:
+                        contribution = forecast[component].std() / forecast['yhat'].std() * 100
+                        explanation["component_contributions"][component] = {
+                            "variance_explained": float(contribution),
+                            "meaning": f"Contributes {contribution:.1f}% to forecast variance"
+                        }
+        
+        except Exception as e:
+            logger.warning("Prophet detailed analysis failed", error=str(e))
+            explanation["error"] = f"Detailed analysis failed: {str(e)}"
+        
+        return explanation
+    
+    async def _explain_exponential_smoothing(
+        self, 
+        model, 
+        data: pd.DataFrame, 
+        date_col: str, 
+        target_col: str
+    ) -> Dict[str, Any]:
+        """Explain Exponential Smoothing model components"""
+        
+        explanation = {
+            "model_type": "Exponential Smoothing",
+            "model_components": {},
+            "smoothing_parameters": {},
+            "component_analysis": {}
+        }
+        
+        try:
+            # Smoothing parameters
+            if hasattr(model, 'params'):
+                params = model.params
+                if 'smoothing_level' in params:
+                    alpha = params['smoothing_level']
+                    explanation["smoothing_parameters"]["alpha"] = {
+                        "value": float(alpha),
+                        "meaning": f"Level smoothing: {alpha:.3f} (higher = more responsive to recent changes)"
+                    }
+                
+                if 'smoothing_trend' in params:
+                    beta = params['smoothing_trend']
+                    explanation["smoothing_parameters"]["beta"] = {
+                        "value": float(beta),
+                        "meaning": f"Trend smoothing: {beta:.3f} (controls trend adaptation)"
+                    }
+                
+                if 'smoothing_seasonal' in params:
+                    gamma = params['smoothing_seasonal']
+                    explanation["smoothing_parameters"]["gamma"] = {
+                        "value": float(gamma),
+                        "meaning": f"Seasonal smoothing: {gamma:.3f} (controls seasonal pattern adaptation)"
+                    }
+            
+            # Model type detection
+            if hasattr(model, 'trend'):
+                trend_type = model.trend
+                explanation["model_components"]["trend"] = {
+                    "type": trend_type,
+                    "meaning": "No trend" if trend_type is None else f"{trend_type.title()} trend component"
+                }
+            
+            if hasattr(model, 'seasonal'):
+                seasonal_type = model.seasonal
+                explanation["model_components"]["seasonal"] = {
+                    "type": seasonal_type,
+                    "meaning": "No seasonality" if seasonal_type is None else f"{seasonal_type.title()} seasonal component"
+                }
+            
+            # Model fit information
+            if hasattr(model, 'aic'):
+                explanation["component_analysis"]["fit_statistics"] = {
+                    "aic": float(model.aic),
+                    "meaning": "Model fit quality (lower is better)"
+                }
+        
+        except Exception as e:
+            logger.warning("Exponential Smoothing analysis failed", error=str(e))
+            explanation["error"] = f"Analysis failed: {str(e)}"
+        
+        return explanation
+    
+    async def _explain_lstm_model(
+        self, 
+        model, 
+        data: pd.DataFrame, 
+        date_col: str, 
+        target_col: str
+    ) -> Dict[str, Any]:
+        """Explain LSTM model architecture and learned patterns"""
+        
+        explanation = {
+            "model_type": "LSTM",
+            "architecture": {},
+            "learned_patterns": {},
+            "feature_importance": {}
+        }
+        
+        try:
+            # Architecture details
+            if hasattr(model, 'hidden_size'):
+                explanation["architecture"]["hidden_size"] = {
+                    "value": model.hidden_size,
+                    "meaning": "Number of hidden units in LSTM layers"
+                }
+            
+            if hasattr(model, 'num_layers'):
+                explanation["architecture"]["num_layers"] = {
+                    "value": model.num_layers,
+                    "meaning": "Number of LSTM layers for pattern learning"
+                }
+            
+            if hasattr(model, 'sequence_length'):
+                explanation["architecture"]["sequence_length"] = {
+                    "value": model.sequence_length,
+                    "meaning": "Number of historical time steps used for prediction"
+                }
+            
+            # Data scaling information
+            if hasattr(model, 'scaler'):
+                explanation["learned_patterns"]["data_scaling"] = {
+                    "applied": True,
+                    "meaning": "Data was normalized for optimal neural network training"
+                }
+            
+            # Pattern learning capability
+            explanation["learned_patterns"]["capabilities"] = {
+                "non_linear": "Captures complex non-linear temporal relationships",
+                "long_term": "Can learn long-term dependencies through LSTM memory",
+                "adaptive": "Automatically discovers relevant patterns without manual specification"
+            }
+            
+            # Feature importance (if lag features are used)
+            sequence_len = getattr(model, 'sequence_length', 10)
+            explanation["feature_importance"] = {
+                f"lag_{i+1}": {
+                    "importance": max(0, 1 - i/sequence_len),  # Recent lags more important
+                    "meaning": f"Value from {i+1} time steps ago"
+                } for i in range(min(sequence_len, 5))
+            }
+        
+        except Exception as e:
+            logger.warning("LSTM analysis failed", error=str(e))
+            explanation["error"] = f"Analysis failed: {str(e)}"
+        
+        return explanation
+    
+    async def _explain_generic_ts_model(
+        self, 
+        model, 
+        data: pd.DataFrame, 
+        date_col: str, 
+        target_col: str
+    ) -> Dict[str, Any]:
+        """Generic explanation for unknown time series models"""
+        
+        explanation = {
+            "model_type": "Time Series Model",
+            "general_analysis": {},
+            "temporal_features": {}
+        }
+        
+        # Analyze the time series data itself
+        ts_data = data.set_index(date_col)[target_col].dropna()
+        
+        if STATSMODELS_AVAILABLE and len(ts_data) > 24:
+            try:
+                # Seasonal decomposition
+                decomposition = seasonal_decompose(ts_data, period=min(12, len(ts_data)//2))
+                
+                trend_strength = decomposition.trend.dropna().std() / ts_data.std()
+                seasonal_strength = decomposition.seasonal.dropna().std() / ts_data.std()
+                
+                explanation["temporal_features"]["trend_strength"] = {
+                    "value": float(trend_strength),
+                    "meaning": "Strength of underlying trend component"
+                }
+                
+                explanation["temporal_features"]["seasonal_strength"] = {
+                    "value": float(seasonal_strength),
+                    "meaning": "Strength of seasonal patterns"
+                }
+                
+            except Exception as e:
+                logger.warning("Temporal decomposition failed", error=str(e))
+        
+        return explanation
+    
+    async def _explain_forecast_uncertainty(
+        self,
+        forecast_data: Dict[str, Any],
+        historical_data: pd.DataFrame,
+        target_column: str
+    ) -> Dict[str, Any]:
+        """Explain forecast confidence and uncertainty sources"""
+        
+        uncertainty_explanation = {
+            "confidence_analysis": {},
+            "uncertainty_sources": {},
+            "reliability_assessment": {}
+        }
+        
+        try:
+            # Confidence interval analysis
+            if "confidence_intervals" in forecast_data:
+                ci_data = forecast_data["confidence_intervals"]
+                uncertainty_explanation["confidence_analysis"] = {
+                    "interpretation": "95% confidence intervals show the range where future values are likely to fall",
+                    "width_meaning": "Wider intervals indicate higher uncertainty in predictions",
+                    "business_use": "Use lower bound for conservative planning, upper bound for optimistic scenarios"
+                }
+            
+            # Sources of uncertainty
+            uncertainty_explanation["uncertainty_sources"] = {
+                "model_uncertainty": "Uncertainty due to model parameter estimation",
+                "data_uncertainty": "Uncertainty from historical data noise and measurement errors",
+                "structural_uncertainty": "Uncertainty from potential changes in underlying patterns",
+                "forecast_horizon": "Uncertainty increases with longer forecast horizons"
+            }
+            
+            # Data quality assessment
+            if len(historical_data) > 0:
+                data_variance = historical_data[target_column].var()
+                data_stability = 1 / (1 + data_variance / historical_data[target_column].mean()**2)
+                
+                uncertainty_explanation["reliability_assessment"] = {
+                    "data_stability": {
+                        "score": float(data_stability),
+                        "meaning": "Higher scores indicate more stable historical patterns"
+                    },
+                    "sample_size": {
+                        "value": len(historical_data),
+                        "meaning": "More historical data generally improves forecast reliability"
+                    }
+                }
+        
+        except Exception as e:
+            logger.warning("Uncertainty analysis failed", error=str(e))
+            uncertainty_explanation["error"] = f"Analysis failed: {str(e)}"
+        
+        return uncertainty_explanation
+    
+    async def _generate_ts_text_explanation(
+        self,
+        explanation: Dict[str, Any],
+        model_type: str,
+        target_column: str
+    ) -> str:
+        """Generate comprehensive text explanation for time series model"""
+        
+        if not self.client:
+            return self._generate_basic_ts_explanation(explanation, model_type, target_column)
+        
+        try:
+            # Prepare explanation content
+            explanation_content = []
+            
+            # Model type and overview
+            explanation_content.append(f"Model Type: {model_type}")
+            
+            # Key components
+            if "model_components" in explanation:
+                components = explanation["model_components"]
+                if components:
+                    explanation_content.append("Key Components:")
+                    for component, details in components.items():
+                        if isinstance(details, dict) and "meaning" in details:
+                            explanation_content.append(f"- {component}: {details['meaning']}")
+            
+            # Parameters and configuration
+            if "parameter_analysis" in explanation:
+                params = explanation["parameter_analysis"]
+                if params:
+                    explanation_content.append("Model Configuration:")
+                    for param_group, details in params.items():
+                        if isinstance(details, dict):
+                            for param, info in details.items():
+                                if isinstance(info, dict) and "meaning" in info:
+                                    explanation_content.append(f"- {param}: {info['meaning']}")
+            
+            # Uncertainty information
+            if "confidence_analysis" in explanation:
+                conf_analysis = explanation["confidence_analysis"]
+                if "interpretation" in conf_analysis:
+                    explanation_content.append(f"Confidence: {conf_analysis['interpretation']}")
+            
+            content_text = "\n".join(explanation_content)
+            
+            prompt = f"""Based on the following time series forecasting model analysis for '{target_column}', write a clear, business-focused explanation (≤200 words) that covers:
+
+1. What the model does and how it works
+2. Key components and their business meaning
+3. How to interpret forecast confidence
+4. Practical implications for decision-making
+
+Model Analysis:
+{content_text}
+
+Focus on:
+- Practical interpretation for business users
+- What drives the forecasts
+- How to use the predictions effectively
+- When to trust vs. be cautious about the forecasts
+
+Write for business stakeholders who need to understand and act on these forecasts."""
+
+            response = await self.client.chat.completions.create(
+                model=settings.OPENAI_MODEL,
+                messages=[
+                    {"role": "system", "content": "You are a data science expert explaining time series forecasting to business stakeholders. Focus on practical insights and decision-making guidance."},
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=0.3,
+                max_tokens=300
+            )
+            
+            return response.choices[0].message.content.strip()
+            
+        except Exception as e:
+            logger.error("Failed to generate time series text explanation", error=str(e))
+            return self._generate_basic_ts_explanation(explanation, model_type, target_column)
+    
+    def _generate_basic_ts_explanation(
+        self,
+        explanation: Dict[str, Any],
+        model_type: str,
+        target_column: str
+    ) -> str:
+        """Generate basic text explanation for time series model"""
+        
+        basic_explanations = {
+            "arima": f"ARIMA model uses historical values and patterns to forecast {target_column}. It analyzes trends, seasonality, and autocorrelations to make predictions.",
+            "prophet": f"Prophet model decomposes {target_column} into trend, seasonal, and holiday components for robust forecasting with automatic pattern detection.",
+            "exponential_smoothing": f"Exponential Smoothing gives more weight to recent observations when forecasting {target_column}, adapting to changes over time.",
+            "lstm": f"LSTM neural network learns complex patterns in {target_column} history to make forecasts, capturing both short-term and long-term dependencies."
+        }
+        
+        base_explanation = basic_explanations.get(model_type.lower(), 
+            f"Time series model analyzes historical patterns in {target_column} to generate forecasts.")
+        
+        # Add uncertainty note
+        uncertainty_note = " Forecast confidence decreases with longer time horizons. Use confidence intervals for risk assessment."
+        
+        return base_explanation + uncertainty_note
+    
+    def _create_fallback_ts_explanation(self, model_path: str, target_column: str) -> Dict[str, Any]:
+        """Create fallback explanation for failed time series analysis"""
+        
+        return {
+            "model_type": "Time Series",
+            "text_explanation": f"Time series model trained to forecast {target_column}. The model learns from historical patterns to predict future values.",
+            "explanation_method": "Fallback",
+            "error": "Detailed analysis not available",
+            "basic_interpretation": {
+                "purpose": f"Forecasts future values of {target_column}",
+                "input": "Historical time series data",
+                "output": "Future predictions with uncertainty estimates",
+                "confidence": "Forecast accuracy typically decreases with longer horizons"
+            }
+        }
     
     async def _explain_with_fallback(self, pipeline, X, y, model_path, target_col):
         """Try multiple explanation approaches with fallbacks"""

@@ -19,9 +19,9 @@ logger = structlog.get_logger()
 
 class MLTaskSpec(BaseModel):
     """Pydantic model for ML task specification validation"""
-    task: str  # "classification" or "regression"
+    task: str  # "classification", "regression", "forecasting", or "clustering"
     target: str
-    metric: str  # recall, precision, f1, accuracy, rmse, mae
+    metric: str  # recall, precision, f1, accuracy, rmse, mae, mape, smape
     constraints: Dict[str, Any] = {}
 
 
@@ -173,10 +173,14 @@ class PromptParser:
     def _find_target_column_from_prompt(self, prompt: str, columns: List[str]) -> Optional[str]:
         """Enhanced target column detection from prompt"""
         
-        # Direct prediction patterns
+        # Direct prediction patterns - improved for time series
         predict_patterns = [
-            r"predict\s+(\w+)", r"predicting\s+(\w+)", r"forecast\s+(\w+)",
-            r"estimate\s+(\w+)", r"target\s+(?:is\s+)?(\w+)", r"outcome\s+(?:is\s+)?(\w+)"
+            # Forecasting patterns with temporal modifiers
+            r"forecast\s+(?:future\s+|next\s+|daily\s+|weekly\s+|monthly\s+|yearly\s+)?(\w+)",
+            r"predict\s+(?:future\s+|next\s+|daily\s+|weekly\s+|monthly\s+|yearly\s+)?(\w+)",
+            # Standard patterns
+            r"predicting\s+(\w+)", r"estimate\s+(\w+)", 
+            r"target\s+(?:is\s+)?(\w+)", r"outcome\s+(?:is\s+)?(\w+)"
         ]
         
         for pattern in predict_patterns:
@@ -273,11 +277,12 @@ class PromptParser:
         return columns[-1] if columns else None
     
     def _determine_task_type(self, prompt: str, target_col: str, sample_rows: List[Dict]) -> Tuple[str, str]:
-        """Determines the ML task type (classification or regression) and appropriate metric based on:
+        """Determines the ML task type and appropriate metric based on:
         
-        1. Explicit keywords in the user's prompt (e.g. "classify", "predict value")
+        1. Explicit keywords in the user's prompt (e.g. "classify", "predict value", "forecast")
         2. Target column name indicators (e.g. "price" suggests regression, "status" suggests classification)
         3. Analysis of sample target values (e.g. binary values suggest classification)
+        4. Time series patterns (e.g. date column + temporal keywords suggest forecasting)
         
         Args:
             prompt: The user's natural language request
@@ -286,10 +291,18 @@ class PromptParser:
             
         Returns:
             Tuple[str, str]: (task_type, metric) where:
-                - task_type is either "classification" or "regression"
-                - metric is an appropriate metric for that task (e.g. "accuracy", "rmse")
+                - task_type is "classification", "regression", "forecasting", or "clustering"
+                - metric is an appropriate metric for that task (e.g. "accuracy", "rmse", "mape")
         """
-        # Explicit task indicators
+        # Explicit task indicators - CHECK FORECASTING FIRST!
+        forecasting_keywords = [
+            "forecast", "forecasting", "predict future", "time series", 
+            "predict next", "predict tomorrow", "predict daily", "predict weekly",
+            "predict monthly", "future sales", "future demand", "future values",
+            "sales forecast", "revenue forecast", "demand forecast", "predict trend",
+            "seasonal prediction", "temporal prediction", "future trends"
+        ]
+        
         classification_keywords = [
             "classify", "classification", "predict category", "predict class",
             "risk assessment", "fraud detection", "churn prediction",
@@ -298,9 +311,20 @@ class PromptParser:
         
         regression_keywords = [
             "regress", "regression", "predict value", "predict amount", 
-            "predict price", "forecast", "estimate", "continuous",
-            "numeric prediction", "sales forecast", "revenue prediction"
+            "predict price", "estimate", "continuous", "numeric prediction"
         ]
+        
+        # Check for forecasting first (highest priority)
+        if any(keyword in prompt for keyword in forecasting_keywords):
+            # Also check for time series indicators in sample data
+            has_date_column = self._has_date_column(sample_rows)
+            if has_date_column:
+                metric = self._choose_forecasting_metric(prompt)
+                return "forecasting", metric
+            else:
+                # Forecasting keywords but no date column - might be regression
+                metric = self._choose_regression_metric(prompt)
+                return "regression", metric
         
         # Check explicit keywords
         if any(keyword in prompt for keyword in classification_keywords):
@@ -399,6 +423,44 @@ class PromptParser:
             return "mae"
         else:
             return "rmse"
+    
+    def _choose_forecasting_metric(self, prompt: str) -> str:
+        """Choose appropriate forecasting metric based on prompt context"""
+        
+        if any(word in prompt for word in ["mape", "percentage", "percent"]):
+            return "mape"
+        elif any(word in prompt for word in ["smape", "symmetric"]):
+            return "smape"
+        elif any(word in prompt for word in ["mae", "absolute"]):
+            return "mae"
+        else:
+            return "mape"  # Default forecasting metric
+    
+    def _has_date_column(self, sample_rows: List[Dict]) -> bool:
+        """Check if sample data contains date/time columns"""
+        
+        if not sample_rows:
+            return False
+        
+        # Check column names for date indicators
+        for row in sample_rows[:1]:  # Just check first row
+            for col_name, value in row.items():
+                col_lower = col_name.lower()
+                
+                # Date column name patterns
+                if any(date_word in col_lower for date_word in ['date', 'time', 'timestamp', 'datetime']):
+                    return True
+                
+                # Check if value looks like a date
+                if isinstance(value, str) and len(value) >= 8:
+                    if any(sep in value for sep in ['-', '/', ' ']):
+                        try:
+                            pd.to_datetime(value)
+                            return True
+                        except:
+                            pass
+        
+        return False
     def _extract_constraints_from_prompt(self, prompt: str, columns: List[str]) -> Dict[str, Any]:
         """Extract constraints from prompt text
         
@@ -494,9 +556,9 @@ Your role is to understand user intent - even from conversational, ambiguous, or
 Given a user request and dataset preview, output ONLY a JSON object that adheres to this schema:
 
 {
-  "task": "classification" | "regression" | "clustering",
+  "task": "classification" | "regression" | "forecasting" | "clustering",
   "target": "column_name" | "" (empty for clustering),
-  "metric": "recall" | "precision" | "f1" | "accuracy" | "rmse" | "mae" | "silhouette",
+  "metric": "recall" | "precision" | "f1" | "accuracy" | "rmse" | "mae" | "mape" | "smape" | "silhouette",
   "constraints": {
     "feature_limit": int | null,
     "exclude_cols": [string] (optional),
@@ -517,16 +579,27 @@ ENHANCED INTERPRETATION RULES:
 BUSINESS LANGUAGE UNDERSTANDING:
 - "analyze patterns" → clustering (no target)
 - "predict whether..." → classification  
-- "estimate/forecast how much..." → regression
+- "estimate/forecast how much..." → regression OR forecasting (if time series data)
+- "forecast future..." → forecasting (requires date/time column)
+- "predict next/daily/weekly/monthly..." → forecasting (if temporal data)
 - "find groups/segments" → clustering
 - "risk assessment" → classification (risk as target)
 - "pricing model" → regression (price as target)
 - "customer behavior" → could be clustering or classification based on context
+- "sales forecast" → forecasting (requires date column)
+- "demand prediction" → forecasting (if temporal) or regression
+
+TIME SERIES / FORECASTING INDICATORS:
+- Must have date/time column AND temporal prediction language
+- Keywords: forecast, predict future, predict next, future values, trend prediction
+- If forecasting keywords but no date column → treat as regression
+- Common targets: sales, revenue, demand, price, traffic, usage
 
 SMART DEFAULTS:
 - Classification metrics: accuracy (general), recall (risk/medical), precision (spam/fraud)
 - Regression metrics: rmse (general), mae (when outliers matter)
-- Auto-exclude: any column with "id", "name", "timestamp", "date" (unless explicitly mentioned)
+- Forecasting metrics: mape (general), smape (symmetric), mae (when outliers matter)
+- Auto-exclude: any column with "id", "name", "timestamp", "date" (unless explicitly mentioned for forecasting)
 - Feature limits: suggest reasonable limits for high-dimensional data (>50 features)
 
 OUTPUT: JSON only, no explanations or additional text."""
@@ -595,6 +668,26 @@ User request: I want to understand what drives our sales numbers and build a mod
                     "constraints": {
                         "feature_limit": None,
                         "exclude_cols": ["product_id"]
+                    }
+                })
+            },
+            
+            # Time series forecasting example
+            {
+                "role": "user",
+                "content": """Dataset: daily_sales.csv (11 columns: date, sales, temperature, marketing_spend, product_category, store_location, day_of_week, is_weekend, month, year, quarter)
+User request: Forecast daily sales for the next 30 days based on historical patterns and seasonal trends."""
+            },
+            {
+                "role": "assistant",
+                "content": json.dumps({
+                    "task": "forecasting",
+                    "target": "sales",
+                    "metric": "mape",
+                    "constraints": {
+                        "feature_limit": None,
+                        "exclude_cols": [],
+                        "time_budget": "medium"
                     }
                 })
             },

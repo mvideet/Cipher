@@ -77,7 +77,8 @@ class QuerySuggester:
             "sample_rows": [],  # Add actual sample rows for GPT analysis
             "data_types": {},
             "potential_targets": [],
-            "domain_indicators": []
+            "domain_indicators": [],
+            "time_series_indicators": []
         }
         
         # Analyze each column
@@ -170,7 +171,106 @@ class QuerySuggester:
         ]):
             analysis["domain_indicators"].append("hr")
         
+        # Detect time series patterns
+        analysis["time_series_indicators"] = self._detect_time_series_patterns(df, column_names_lower)
+        
         return convert_numpy_types(analysis)
+    
+    def _detect_time_series_patterns(self, df: pd.DataFrame, column_names_lower: List[str]) -> List[Dict[str, Any]]:
+        """Detect time series patterns in the dataset"""
+        
+        indicators = []
+        
+        # Look for date/time columns
+        date_columns = []
+        for col in df.columns:
+            col_lower = col.lower()
+            # Check column name patterns
+            if any(date_word in col_lower for date_word in ['date', 'time', 'timestamp', 'datetime']):
+                date_columns.append(col)
+            # Check if values look like dates
+            elif df[col].dtype == 'object':
+                sample_values = df[col].dropna().head(10).astype(str)
+                if len(sample_values) > 0:
+                    # Simple date pattern check
+                    date_like_count = 0
+                    for val in sample_values:
+                        if len(val) >= 8 and any(sep in val for sep in ['-', '/', ' ']):
+                            try:
+                                pd.to_datetime(val)
+                                date_like_count += 1
+                            except:
+                                pass
+                    if date_like_count >= len(sample_values) * 0.7:  # 70% look like dates
+                        date_columns.append(col)
+        
+        if date_columns:
+            indicators.append({
+                "type": "date_columns",
+                "columns": date_columns,
+                "confidence": "high"
+            })
+        
+        # Look for sequential/ordered patterns
+        if len(df) > 10:  # Need enough data
+            # Check if data appears to be chronologically ordered
+            for date_col in date_columns:
+                try:
+                    dates = pd.to_datetime(df[date_col]).dropna()
+                    if len(dates) > 1:
+                        # Check if dates are mostly in order
+                        sorted_dates = dates.sort_values()
+                        order_score = (dates.values == sorted_dates.values).mean()
+                        if order_score > 0.8:  # 80% in chronological order
+                            indicators.append({
+                                "type": "chronological_order",
+                                "date_column": date_col,
+                                "order_score": float(order_score),
+                                "confidence": "high"
+                            })
+                except:
+                    pass
+        
+        # Look for time series specific column patterns
+        column_text = ' '.join(column_names_lower)
+        
+        # Sales/Revenue time series
+        sales_patterns = ['sales', 'revenue', 'income', 'profit', 'orders', 'transactions', 'volume']
+        if any(pattern in column_text for pattern in sales_patterns) and date_columns:
+            indicators.append({
+                "type": "sales_timeseries",
+                "potential_targets": [col for col in df.columns if any(pattern in col.lower() for pattern in sales_patterns)],
+                "confidence": "high"
+            })
+        
+        # Stock/Financial time series
+        financial_patterns = ['price', 'stock', 'value', 'close', 'open', 'high', 'low', 'volume']
+        if any(pattern in column_text for pattern in financial_patterns) and date_columns:
+            indicators.append({
+                "type": "financial_timeseries",
+                "potential_targets": [col for col in df.columns if any(pattern in col.lower() for pattern in financial_patterns)],
+                "confidence": "high"
+            })
+        
+        # Sensor/IoT time series
+        sensor_patterns = ['sensor', 'temperature', 'humidity', 'pressure', 'measurement', 'reading']
+        if any(pattern in column_text for pattern in sensor_patterns) and date_columns:
+            indicators.append({
+                "type": "sensor_timeseries",
+                "potential_targets": [col for col in df.columns if any(pattern in col.lower() for pattern in sensor_patterns)],
+                "confidence": "medium"
+            })
+        
+        # Website/Digital analytics time series
+        web_patterns = ['traffic', 'visitors', 'clicks', 'views', 'sessions', 'conversions']
+        if any(pattern in column_text for pattern in web_patterns) and date_columns:
+            indicators.append({
+                "type": "web_analytics_timeseries",
+                "potential_targets": [col for col in df.columns if any(pattern in col.lower() for pattern in web_patterns)],
+                "confidence": "medium"
+            })
+        
+        return indicators
     
     async def _generate_gpt_suggestions(
         self, 
@@ -190,6 +290,7 @@ class QuerySuggester:
         
         potential_targets = dataset_analysis.get("potential_targets", [])
         domain_indicators = dataset_analysis.get("domain_indicators", [])
+        time_series_indicators = dataset_analysis.get("time_series_indicators", [])
         sample_rows = dataset_analysis.get("sample_rows", [])
         
         # Format sample data for GPT analysis
@@ -204,12 +305,29 @@ Sample Data (first {len(sample_rows)} rows):
                     row_text += ", ..."
                 sample_data_text += f"Row {i}: {row_text}\n"
         
+        # Format time series information
+        time_series_info = ""
+        if time_series_indicators:
+            ts_details = []
+            for indicator in time_series_indicators:
+                if indicator['type'] == 'date_columns':
+                    ts_details.append(f"Date columns detected: {', '.join(indicator['columns'])}")
+                elif indicator['type'] == 'chronological_order':
+                    ts_details.append(f"Data is chronologically ordered by {indicator['date_column']}")
+                elif indicator['type'].endswith('_timeseries'):
+                    ts_type = indicator['type'].replace('_timeseries', '').replace('_', ' ').title()
+                    targets = ', '.join(indicator.get('potential_targets', []))
+                    ts_details.append(f"{ts_type} time series detected (targets: {targets})")
+            
+            if ts_details:
+                time_series_info = f"\nTime Series Indicators:\n- " + "\n- ".join(ts_details)
+
         prompt = f"""You are an AI assistant helping users get started with machine learning on their dataset. 
 
 Dataset Summary:
 - Shape: {dataset_analysis['shape']['rows']} rows, {dataset_analysis['shape']['columns']} columns
 - Potential target variables: {', '.join(potential_targets) if potential_targets else 'Not obvious'}
-- Likely domain: {', '.join(domain_indicators) if domain_indicators else 'General'}
+- Likely domain: {', '.join(domain_indicators) if domain_indicators else 'General'}{time_series_info}
 
 Columns:
 {chr(10).join(columns_summary)}
@@ -242,7 +360,17 @@ Each suggestion should:
 TASK TYPE GUIDANCE:
 - **Classification**: When predicting categories, outcomes, or yes/no decisions
 - **Regression**: When predicting numerical values, amounts, or continuous measures  
+- **Forecasting**: When predicting future values in time series data (requires date/time column)
 - **Clustering**: When discovering hidden patterns, customer segments, or grouping similar records
+
+SPECIAL ATTENTION TO TIME SERIES DATA:
+If time series indicators are present (date columns, chronological ordering, temporal patterns), PRIORITIZE forecasting suggestions. Time series forecasting is valuable for:
+- Sales and revenue prediction
+- Demand forecasting  
+- Financial market prediction
+- Sensor readings and IoT data
+- Website traffic forecasting
+- Customer behavior over time
 
 For clustering tasks, analyze the actual data characteristics and suggest specific, meaningful clustering use cases based on what you observe in the sample data. Consider what business insights could be gained from grouping similar records and how these groups could be used for decision-making.
 
@@ -253,8 +381,23 @@ BUSINESS CONTEXT EXAMPLES:
 - HR: "Segment employees into groups based on performance and engagement patterns"
 - Marketing: "Predict the optimal price for maximizing product sales"
 
+FORECASTING EXAMPLES (when time series data is detected):
+- Sales: "Forecast daily sales for the next 30 days based on historical patterns and seasonal trends"
+- Retail: "Predict future demand for products to optimize inventory management"
+- Finance: "Forecast stock prices or market indices for investment decision making"
+- Energy: "Predict energy consumption patterns for resource planning"
+- Web Analytics: "Forecast website traffic and user engagement metrics"
+
 Return your response as a JSON array of objects with this format:
 [
+  {{
+    "query": "Forecast daily sales for the next 30 days to optimize inventory and staffing",
+    "type": "forecasting", 
+    "target": "sales",
+    "description": "Time series forecasting to predict future sales values using historical patterns",
+    "business_value": "Improve inventory management, optimize staffing levels, and plan marketing campaigns",
+    "actionable_insights": "Adjust inventory before high-demand periods, schedule staff optimally, time promotions"
+  }},
   {{
     "query": "Predict customer churn risk to identify at-risk accounts for proactive retention",
     "type": "classification", 
@@ -298,9 +441,15 @@ Make the queries sound natural, business-focused, and directly actionable based 
             for suggestion in suggestions:
                 if isinstance(suggestion, dict) and "query" in suggestion:
                     # Ensure all required fields
+                    task_type = suggestion.get("type", "classification").lower()
+                    # Validate task type
+                    valid_types = ["classification", "regression", "forecasting", "clustering", "exploration"]
+                    if task_type not in valid_types:
+                        task_type = "classification"  # Default fallback
+                    
                     clean_suggestion = {
                         "query": suggestion.get("query", "").strip(),
-                        "type": suggestion.get("type", "classification").lower(),
+                        "type": task_type,
                         "target": suggestion.get("target", ""),
                         "description": suggestion.get("description", ""),
                         "business_value": suggestion.get("business_value", ""),
@@ -324,8 +473,43 @@ Make the queries sound natural, business-focused, and directly actionable based 
         
         suggestions = []
         columns = df.columns.tolist()
+        column_names_lower = [col.lower() for col in columns]
         
-        # Find potential target columns
+        # Check for time series patterns first
+        time_series_indicators = self._detect_time_series_patterns(df, column_names_lower)
+        
+        # Generate time series forecasting suggestions if detected
+        if time_series_indicators:
+            for indicator in time_series_indicators:
+                if indicator['type'].endswith('_timeseries') and 'potential_targets' in indicator:
+                    for target in indicator['potential_targets'][:2]:  # Max 2 forecasting targets
+                        # Find the date column
+                        date_col = None
+                        for ts_ind in time_series_indicators:
+                            if ts_ind['type'] == 'date_columns':
+                                date_col = ts_ind['columns'][0] if ts_ind['columns'] else None
+                                break
+                        
+                        ts_type = indicator['type'].replace('_timeseries', '').replace('_', ' ').title()
+                        
+                        query = f"Forecast future {target} values using historical patterns and trends"
+                        if ts_type == "Sales":
+                            query = f"Forecast daily {target} for the next 30 days based on historical patterns, seasonality, and trends"
+                        elif ts_type == "Financial":
+                            query = f"Predict future {target} movements based on historical price patterns and market trends"
+                        elif ts_type == "Sensor":
+                            query = f"Forecast {target} readings to predict system behavior and detect anomalies"
+                        
+                        suggestions.append({
+                            "query": query,
+                            "type": "forecasting",
+                            "target": target,
+                            "description": f"Time series forecasting to predict future {target} values",
+                            "business_value": f"Plan ahead based on predicted {target} trends",
+                            "actionable_insights": f"Make data-driven decisions about future {target} patterns"
+                        })
+        
+        # Find potential target columns for classification/regression
         potential_targets = []
         for col in columns:
             if col.lower() in ['target', 'label', 'class', 'outcome', 'result', 'y']:
