@@ -20,7 +20,10 @@ from sklearn.ensemble import (
     RandomForestClassifier, RandomForestRegressor,
     GradientBoostingClassifier, GradientBoostingRegressor,
     AdaBoostClassifier, AdaBoostRegressor,
-    ExtraTreesClassifier, ExtraTreesRegressor
+    ExtraTreesClassifier, ExtraTreesRegressor,
+    IsolationForest, VotingClassifier, VotingRegressor,
+    StackingClassifier, StackingRegressor,
+    HistGradientBoostingClassifier, HistGradientBoostingRegressor
 )
 from sklearn.svm import SVC, SVR
 from sklearn.linear_model import (
@@ -33,6 +36,12 @@ from sklearn.cluster import KMeans, DBSCAN, AgglomerativeClustering, SpectralClu
 from sklearn.mixture import GaussianMixture
 import lightgbm as lgb
 import xgboost as xgb
+
+try:
+    import catboost as cb
+    CATBOOST_AVAILABLE = True
+except ImportError:
+    CATBOOST_AVAILABLE = False
 
 from ..core.config import settings
 from ..models.schema import DataProfile
@@ -266,8 +275,8 @@ OUTPUT FORMAT: Respond with ONLY valid JSON matching this schema:
 {
   "recommended_models": [
     {
-      "model_type": "random_forest" | "xgboost" | "lightgbm" | "neural_network" | "svm" | "logistic_regression" | "linear_regression" | "knn" | "naive_bayes" | "kmeans" | "dbscan" | "hierarchical" | "spectral" | "gaussian_mixture",
-      "model_family": "tree_based" | "linear" | "neural" | "ensemble" | "instance_based" | "probabilistic" | "clustering",
+      "model_type": "random_forest" | "xgboost" | "lightgbm" | "catboost" | "hist_gradient_boosting" | "neural_network" | "svm" | "logistic_regression" | "linear_regression" | "knn" | "naive_bayes" | "isolation_forest" | "voting" | "stacking" | "kmeans" | "dbscan" | "hierarchical" | "spectral" | "gaussian_mixture",
+              "model_family": "tree_based" | "linear" | "neural" | "ensemble" | "instance_based" | "probabilistic" | "anomaly_detection" | "clustering",
       "complexity_score": 1-10,
       "expected_training_time": "fast" | "medium" | "slow",
       "parameter_estimates": {
@@ -555,7 +564,7 @@ Consider the dataset size, feature types, missing data patterns, and business do
                 }
             ]
             
-        elif model_type in ["xgboost", "lightgbm"]:
+        elif model_type in ["xgboost", "lightgbm", "catboost"]:
             # Gradient boosting architectures
             architectures = [
                 {
@@ -574,6 +583,52 @@ Consider the dataset size, feature types, missing data patterns, and business do
                     "name": "precise_boost",
                     "description": "Slow but precise boosting",
                     "config": {"n_estimators": 500, "learning_rate": 0.01, "max_depth": 8},
+                    "complexity": "high"
+                }
+            ]
+            
+        elif model_type == "hist_gradient_boosting":
+            # Histogram-based gradient boosting architectures
+            architectures = [
+                {
+                    "name": "fast_hist_boost",
+                    "description": "Fast histogram-based boosting",
+                    "config": {"max_iter": 100, "learning_rate": 0.1, "max_depth": 4},
+                    "complexity": "low"
+                },
+                {
+                    "name": "balanced_hist_boost",
+                    "description": "Balanced histogram boosting",
+                    "config": {"max_iter": 300, "learning_rate": 0.05, "max_depth": 8},
+                    "complexity": "medium"
+                },
+                {
+                    "name": "precise_hist_boost",
+                    "description": "Precise histogram boosting",
+                    "config": {"max_iter": 500, "learning_rate": 0.01, "max_depth": 12},
+                    "complexity": "high"
+                }
+            ]
+            
+        elif model_type == "isolation_forest":
+            # Isolation Forest architectures
+            architectures = [
+                {
+                    "name": "fast_isolation",
+                    "description": "Fast anomaly detection",
+                    "config": {"n_estimators": 50, "max_samples": 0.5, "contamination": 0.1},
+                    "complexity": "low"
+                },
+                {
+                    "name": "balanced_isolation",
+                    "description": "Balanced anomaly detection",
+                    "config": {"n_estimators": 100, "max_samples": 0.8, "contamination": 0.05},
+                    "complexity": "medium"
+                },
+                {
+                    "name": "thorough_isolation",
+                    "description": "Thorough anomaly detection",
+                    "config": {"n_estimators": 200, "max_samples": 1.0, "contamination": 0.01},
                     "complexity": "high"
                 }
             ]
@@ -789,12 +844,17 @@ Consider the dataset size, feature types, missing data patterns, and business do
             "extra_trees": "tree_based", 
             "xgboost": "tree_based",
             "lightgbm": "tree_based",
+            "catboost": "tree_based",
+            "hist_gradient_boosting": "tree_based",
             "neural_network": "neural",
             "svm": "instance_based",
             "logistic_regression": "linear",
             "linear_regression": "linear",
             "knn": "instance_based",
             "naive_bayes": "probabilistic",
+            "isolation_forest": "anomaly_detection",
+            "voting": "ensemble",
+            "stacking": "ensemble",
             "kmeans": "clustering",
             "dbscan": "clustering",
             "hierarchical": "clustering",
@@ -805,12 +865,13 @@ Consider the dataset size, feature types, missing data patterns, and business do
     
     def _build_model_catalog(self) -> Dict[str, Any]:
         """Build catalog of available models"""
-        return {
+        catalog = {
             "tree_based": {
                 "random_forest": {"class": RandomForestClassifier, "regressor": RandomForestRegressor},
                 "extra_trees": {"class": ExtraTreesClassifier, "regressor": ExtraTreesRegressor},
                 "xgboost": {"class": xgb.XGBClassifier, "regressor": xgb.XGBRegressor},
-                "lightgbm": {"class": lgb.LGBMClassifier, "regressor": lgb.LGBMRegressor}
+                "lightgbm": {"class": lgb.LGBMClassifier, "regressor": lgb.LGBMRegressor},
+                "hist_gradient_boosting": {"class": HistGradientBoostingClassifier, "regressor": HistGradientBoostingRegressor}
             },
             "linear": {
                 "logistic_regression": {"class": LogisticRegression, "regressor": LinearRegression},
@@ -827,6 +888,13 @@ Consider the dataset size, feature types, missing data patterns, and business do
             "probabilistic": {
                 "naive_bayes": {"class": GaussianNB, "regressor": None}
             },
+            "anomaly_detection": {
+                "isolation_forest": {"class": IsolationForest, "regressor": None}
+            },
+            "ensemble": {
+                "voting": {"class": VotingClassifier, "regressor": VotingRegressor},
+                "stacking": {"class": StackingClassifier, "regressor": StackingRegressor}
+            },
             "clustering": {
                 "kmeans": {"class": KMeans, "regressor": None},
                 "dbscan": {"class": DBSCAN, "regressor": None},
@@ -834,4 +902,10 @@ Consider the dataset size, feature types, missing data patterns, and business do
                 "spectral": {"class": SpectralClustering, "regressor": None},
                 "gaussian_mixture": {"class": GaussianMixture, "regressor": None}
             }
-        } 
+        }
+        
+        # Add CatBoost if available
+        if CATBOOST_AVAILABLE:
+            catalog["tree_based"]["catboost"] = {"class": cb.CatBoostClassifier, "regressor": cb.CatBoostRegressor}
+        
+        return catalog 

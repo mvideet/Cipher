@@ -28,6 +28,7 @@ numpy = "^1.25.0"
 matplotlib = "^3.7.0"
 seaborn = "^0.12.0"
 plotly = "^5.17.0"
+catboost = "^1.2.0"
 
 [tool.poetry.extras]
 dev = ["pytest", "black", "ruff", "pre-commit", "pytest-asyncio"]
