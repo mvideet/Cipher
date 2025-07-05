@@ -1051,22 +1051,34 @@ async def _run_enhanced_training_with_selection(
             # Time series trainer returns ModelArtifact with different format
             logger.info("✅ Time series training completed successfully with user selection", 
                        run_id=run_id,
-                       best_model_type=result.model_type,
-                       performance_metrics=result.performance_metrics)
+                       best_model_type=result.family,
+                       performance_rmse=result.val_score)
+            
+            # Get forecast data from the trainer
+            forecast_data = None
+            if hasattr(trainer, 'forecast_data'):
+                forecast_data = trainer.forecast_data
             
             # Send completion notification for time series
-            await websocket_manager_instance.broadcast_training_complete(session_id, {
+            completion_data = {
                 "forecasting_results": True,  # Mark as forecasting
                 "run_id": run_id,
                 "best_model": {
-                    "family": result.model_type,
-                    "model_type": result.model_type,
-                    "performance_metrics": result.performance_metrics
+                    "family": result.family,
+                    "model_type": result.family,
+                    "val_score": result.val_score,
+                    "train_score": result.train_score
                 },
                 "model_path": result.model_path,
                 "selected_models": selected_model_types,
                 "training_method": "time_series_forecasting"
-            })
+            }
+            
+            # Add forecast data if available
+            if forecast_data:
+                completion_data["forecast_data"] = forecast_data
+            
+            await websocket_manager_instance.broadcast_training_complete(session_id, completion_data)
         else:
             # Enhanced trainer returns ensemble results
             logger.info("✅ Enhanced training completed successfully with user selection", 

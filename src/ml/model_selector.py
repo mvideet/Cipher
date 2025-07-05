@@ -330,46 +330,55 @@ ADVANCED GUIDELINES:
 - Scalability becomes important
 
 **For Time Series Forecasting:**
+- **CRITICAL: For forecasting tasks, ONLY recommend time series models from this list:**
+  - arima, prophet, exponential_smoothing, lstm_ts, seasonal_decompose
+  - **DO NOT recommend** tree-based, linear, neural, or other non-time-series models
+  - **model_family MUST be "time_series" for ALL forecasting recommendations**
+
 - **Data Length Considerations**:
-  - <100 points: Simple exponential smoothing, linear trend models
-  - 100-1000 points: ARIMA, Prophet, simple seasonality models
-  - >1000 points: LSTM, complex seasonal ARIMA, ensemble methods
+  - <100 points: exponential_smoothing, arima (simple)
+  - 100-1000 points: arima, prophet, exponential_smoothing
+  - >1000 points: prophet, lstm_ts, seasonal_decompose, arima
   
 - **Seasonality & Patterns**:
-  - Strong seasonality: Prophet, seasonal ARIMA, Holt-Winters
-  - Trend-dominated: Linear regression with time features, Prophet
-  - Irregular patterns: LSTM, ensemble of simple models
-  - Multiple seasonalities: Prophet, STL decomposition + modeling
+  - Strong seasonality: prophet, seasonal_decompose, arima (seasonal)
+  - Trend-dominated: prophet, exponential_smoothing, arima
+  - Irregular patterns: lstm_ts, prophet
+  - Multiple seasonalities: prophet, seasonal_decompose
   
 - **Forecast Horizon**:
-  - Short-term (1-7 steps): ARIMA, exponential smoothing
-  - Medium-term (1-4 weeks): Prophet, seasonal models
-  - Long-term (months/years): Prophet with external regressors, ensemble
+  - Short-term (1-7 steps): arima, exponential_smoothing
+  - Medium-term (1-4 weeks): prophet, arima
+  - Long-term (months/years): prophet, lstm_ts
   
 - **Data Frequency**:
-  - Daily: Prophet (handles holidays), seasonal ARIMA
-  - Weekly/Monthly: ARIMA, exponential smoothing, linear models
-  - Hourly: LSTM for complex patterns, Prophet for seasonality
+  - Daily: prophet, arima, seasonal_decompose
+  - Weekly/Monthly: arima, exponential_smoothing, prophet
+  - Hourly: lstm_ts, prophet
   
 - **Business Requirements**:
-  - Interpretability needed: ARIMA, exponential smoothing, linear trend
-  - Automatic seasonality: Prophet
-  - Complex non-linear patterns: LSTM, ensemble methods
-  - Uncertainty quantification: Prophet, ARIMA with confidence intervals
+  - Interpretability needed: arima, exponential_smoothing, prophet
+  - Automatic seasonality: prophet
+  - Complex non-linear patterns: lstm_ts, prophet
+  - Uncertainty quantification: prophet, arima
 
 **Model Synergy Rules:**
-- Always include one fast, interpretable baseline (linear/tree)
-- Mix model families for diversity (linear + tree + neural)
-- For time series: combine trend-following (Prophet) + pattern-learning (LSTM) + simple baseline (exponential smoothing)
+- **For forecasting tasks**: ONLY use time series models (arima, prophet, exponential_smoothing, lstm_ts, seasonal_decompose)
+- **For forecasting ensembles**: combine trend-following (prophet) + statistical (arima) + simple baseline (exponential_smoothing)
+- **For non-forecasting tasks**: Always include one fast, interpretable baseline (linear/tree)
+- **For non-forecasting tasks**: Mix model families for diversity (linear + tree + neural)
 - Consider feature preprocessing differences (scaling sensitive vs not)
 - Balance interpretable vs black-box models
 
 **Business Context Integration:**
-- High interpretability needs → prefer linear, tree-based models, ARIMA
-- Real-time inference → include fast models (linear, small trees, simple exponential smoothing)
-- Batch prediction → can use slower, more complex models (LSTM, complex ARIMA)
-- Missing data handling → prefer tree-based over linear methods, Prophet handles gaps well
-- Seasonal business patterns → Prophet, seasonal ARIMA, Holt-Winters
+- **For forecasting tasks**: High interpretability needs → arima, exponential_smoothing, prophet
+- **For forecasting tasks**: Real-time inference → exponential_smoothing, arima (simple)
+- **For forecasting tasks**: Batch prediction → prophet, lstm_ts, arima (complex)
+- **For forecasting tasks**: Missing data handling → prophet (handles gaps automatically)
+- **For forecasting tasks**: Seasonal business patterns → prophet, seasonal_decompose, arima (seasonal)
+- **For non-forecasting tasks**: High interpretability needs → linear, tree-based models
+- **For non-forecasting tasks**: Real-time inference → linear, small trees
+- **For non-forecasting tasks**: Missing data handling → tree-based over linear methods
 
 Provide specific, actionable recommendations tailored to the exact dataset characteristics provided."""
 

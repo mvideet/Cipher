@@ -163,8 +163,11 @@ class CipherApp {
     handleTrainingComplete(data) {
         console.log('Training completed:', data);
         
-        // Check if this is enhanced training
-        if (data.enhanced_results) {
+        // Check if this is forecasting training
+        if (data.forecasting_results) {
+            // Show forecasting training results
+            uiManager.showTrainingResults(data);
+        } else if (data.enhanced_results) {
             // Show enhanced training results
             uiManager.showEnhancedTrainingResults(data);
         } else {
@@ -200,11 +203,53 @@ class CipherApp {
     // Handle training status updates
     handleTrainingStatus(data) {
         console.log('Training status update:', data);
+        
+        // Handle time series specific updates
+        if (data.type === 'timeseries_training_update') {
+            this.handleTimeSeriesTrainingUpdate(data);
+            return;
+        }
+        
         uiManager.addTrainingStatusLog(data);
         
         // Handle model completion for enhanced mode
         if (data.data?.status === 'model_completed') {
             uiManager.handleModelCompletion(data);
+        }
+    }
+
+    // Handle time series training updates
+    handleTimeSeriesTrainingUpdate(data) {
+        console.log('Time series training update:', data);
+        
+        const statusData = data.data || {};
+        const status = data.status || statusData.status;
+        
+        // Add training log
+        if (statusData.status || statusData.message) {
+            uiManager.addTrainingLog({
+                family: 'Time Series',
+                trial: 1,
+                val_metric: 0,
+                elapsed_s: (Date.now() - this.startTime) / 1000,
+                message: statusData.message || `Status: ${status}`,
+                type: 'info'
+            });
+        }
+        
+        // Update model cards for time series models
+        if (status === 'training_model' && statusData.model_type) {
+            uiManager.updateEnhancedModelProgress(statusData.model_type, {
+                trial: 1,
+                status: 'training',
+                val_metric: undefined
+            });
+        } else if (status === 'training_complete' && statusData.best_model) {
+            uiManager.updateEnhancedModelProgress(statusData.best_model, {
+                trial: 5,
+                status: 'completed',
+                val_metric: statusData.performance?.rmse
+            });
         }
     }
 

@@ -33,13 +33,10 @@ except ImportError:
     PROPHET_AVAILABLE = False
     warnings.warn("Prophet not available. Install with: pip install prophet")
 
-# Auto-ARIMA
-try:
-    from pmdarima import auto_arima
-    PMDARIMA_AVAILABLE = True
-except ImportError:
-    PMDARIMA_AVAILABLE = False
-    warnings.warn("pmdarima not available. Install with: pip install pmdarima")
+# Auto-ARIMA - Disabled for Python 3.13 compatibility
+PMDARIMA_AVAILABLE = False
+# Note: pmdarima has compatibility issues with Python 3.13
+# We'll use manual ARIMA parameter selection instead
 
 # PyTorch for LSTM
 try:
@@ -398,25 +395,14 @@ class ARIMAForecaster:
     def auto_fit(self, series: pd.Series, seasonal: bool = True, max_p: int = 5, max_d: int = 2, max_q: int = 5) -> Dict[str, Any]:
         """Automatically fit ARIMA model with optimal parameters"""
         
+        # Store training data for fallback forecasting
+        self.train_data = series.copy()
+        
         try:
-            # Try to use auto_arima if available
-            if PMDARIMA_AVAILABLE:
-                self.fitted_model = auto_arima(
-                    series,
-                    seasonal=seasonal,
-                    max_p=max_p,
-                    max_d=max_d,
-                    max_q=max_q,
-                    suppress_warnings=True,
-                    error_action='ignore'
-                )
-                order = self.fitted_model.order
-                seasonal_order = self.fitted_model.seasonal_order if seasonal else None
-            else:
-                # Manual ARIMA fitting
-                order = self._find_best_arima_order(series, max_p, max_d, max_q)
-                seasonal_order = None
-                self.fitted_model = ARIMA(series, order=order).fit()
+            # Manual ARIMA fitting (pmdarima not available in Python 3.13)
+            order = self._find_best_arima_order(series, max_p, max_d, max_q)
+            seasonal_order = None
+            self.fitted_model = ARIMA(series, order=order).fit()
             
             return {
                 "order": order,
@@ -442,21 +428,36 @@ class ARIMAForecaster:
                 raise e2
     
     def _find_best_arima_order(self, series: pd.Series, max_p: int, max_d: int, max_q: int) -> Tuple[int, int, int]:
-        """Find best ARIMA order using grid search"""
+        """Find best ARIMA order using common patterns for Python 3.13 compatibility"""
         best_aic = float('inf')
-        best_order = (1, 1, 1)
+        best_order = (1, 1, 1)  # Default fallback
         
-        for p in range(max_p + 1):
-            for d in range(max_d + 1):
-                for q in range(max_q + 1):
-                    try:
-                        model = ARIMA(series, order=(p, d, q)).fit()
-                        if model.aic < best_aic:
-                            best_aic = model.aic
-                            best_order = (p, d, q)
-                    except:
-                        continue
+        # Test common ARIMA orders that work well for most time series
+        common_orders = [
+            (0, 1, 1),   # Simple moving average
+            (1, 1, 0),   # Simple trend
+            (1, 1, 1),   # Classic ARIMA
+            (2, 1, 2),   # More complex
+            (0, 1, 2),   # Moving average with trend
+            (2, 1, 0),   # Autoregressive with trend
+            (1, 0, 1),   # ARMA (no differencing)
+            (0, 0, 1),   # MA only
+            (1, 0, 0),   # AR only
+        ]
         
+        for p, d, q in common_orders:
+            if p <= max_p and d <= max_d and q <= max_q:
+                try:
+                    model = ARIMA(series, order=(p, d, q))
+                    fitted = model.fit()
+                    if fitted.aic < best_aic:
+                        best_aic = fitted.aic
+                        best_order = (p, d, q)
+                except Exception as e:
+                    logger.debug(f"ARIMA({p},{d},{q}) failed: {str(e)}")
+                    continue
+        
+        logger.info(f"Selected ARIMA order {best_order} with AIC {best_aic:.2f}")
         return best_order
     
     def forecast(self, steps: int, confidence_interval: float = 0.95) -> Dict[str, np.ndarray]:
@@ -465,14 +466,29 @@ class ARIMAForecaster:
             raise ValueError("Model must be fitted first")
         
         try:
-            forecast_result = self.fitted_model.forecast(steps=steps)
+            # Use get_forecast for better control and error handling
+            forecast_result = self.fitted_model.get_forecast(steps=steps)
             
-            if hasattr(forecast_result, 'predicted_mean'):
-                forecast = forecast_result.predicted_mean.values
-                conf_int = forecast_result.conf_int().values if hasattr(forecast_result, 'conf_int') else None
-            else:
-                forecast = forecast_result if isinstance(forecast_result, np.ndarray) else np.array([forecast_result])
-                conf_int = None
+            # Extract forecast values
+            forecast = forecast_result.predicted_mean.values if hasattr(forecast_result, 'predicted_mean') else forecast_result.forecast
+            
+            # Extract confidence intervals if available
+            conf_int = None
+            if hasattr(forecast_result, 'conf_int'):
+                try:
+                    conf_int = forecast_result.conf_int().values
+                except:
+                    # If conf_int() fails, try summary_frame
+                    try:
+                        summary = forecast_result.summary_frame()
+                        if 'mean_ci_lower' in summary.columns and 'mean_ci_upper' in summary.columns:
+                            conf_int = summary[['mean_ci_lower', 'mean_ci_upper']].values
+                    except:
+                        conf_int = None
+            
+            # Ensure forecast is a numpy array
+            if not isinstance(forecast, np.ndarray):
+                forecast = np.array([forecast] if np.isscalar(forecast) else forecast)
             
             return {
                 "forecast": forecast,
@@ -481,8 +497,25 @@ class ARIMAForecaster:
             
         except Exception as e:
             logger.warning("ARIMA forecast failed", error=str(e))
-            # Fallback to last value
-            last_value = self.fitted_model.fittedvalues.iloc[-1] if hasattr(self.fitted_model, 'fittedvalues') else 0
+            # Fallback to simple moving average of recent values
+            try:
+                if hasattr(self, 'train_data') and len(self.train_data) > 0:
+                    # Use last 5 values for moving average
+                    recent_values = self.train_data[-5:].values if len(self.train_data) >= 5 else self.train_data.values
+                    last_value = float(np.mean(recent_values))
+                elif hasattr(self.fitted_model, 'fittedvalues') and len(self.fitted_model.fittedvalues) > 0:
+                    # Try to get the last fitted value safely
+                    fitted_values = self.fitted_model.fittedvalues
+                    if isinstance(fitted_values, pd.Series):
+                        last_value = float(fitted_values.iloc[-1])
+                    else:
+                        last_value = float(fitted_values[-1])
+                else:
+                    last_value = 0.0
+            except Exception as fallback_error:
+                logger.warning("Fallback forecast calculation failed", error=str(fallback_error))
+                last_value = 0.0
+            
             return {
                 "forecast": np.full(steps, last_value),
                 "confidence_intervals": None
@@ -572,10 +605,13 @@ class TimeSeriesTrainer:
         # Split data temporally
         train_df, test_df = data_pipeline.temporal_train_test_split(prepared_df, test_size=0.2)
         
+        # Convert characteristics to JSON-serializable format
+        serializable_characteristics = self._make_json_serializable(ts_characteristics)
+        
         await self._send_training_status_update("data_prepared", {
             "train_size": len(train_df),
             "test_size": len(test_df),
-            "characteristics": ts_characteristics
+            "characteristics": serializable_characteristics
         })
         
         # Get model recommendations using the ensemble recommender (supports time series)
@@ -608,7 +644,7 @@ class TimeSeriesTrainer:
         
         await self._send_training_status_update("models_selected", {
             "recommended_models": [rec.model_type for rec in model_recommendations],
-            "user_selected": len(selected_models) > 0
+            "user_selected": bool(len(selected_models) > 0)
         })
         
         # Train models
@@ -634,19 +670,35 @@ class TimeSeriesTrainer:
                              error=str(e))
                 continue
         
+        # Only create fallback if no models trained and no specific user selection
         if not trained_models:
-            # Fallback strategy
-            fallback_model = await self._create_fallback_model(
-                train_df, test_df, data_pipeline, forecast_horizon, ts_characteristics
-            )
-            trained_models.append(fallback_model)
+            if not selected_models:
+                # No user selection - create fallback
+                logger.info("No models trained successfully, creating fallback model")
+                fallback_model = await self._create_fallback_model(
+                    train_df, test_df, data_pipeline, forecast_horizon, ts_characteristics
+                )
+                trained_models.append(fallback_model)
+            else:
+                # User selected specific models but they all failed
+                logger.error("All user-selected models failed to train")
+                raise ValueError(f"All selected models ({selected_models}) failed to train. Please try different models or check your data.")
         
         # Select best model
         best_model = self._select_best_ts_model(trained_models)
         
+        # Generate forecast data for visualization
+        forecast_data = await self._generate_forecast_visualization_data(
+            best_model, train_df, test_df, data_pipeline, forecast_horizon
+        )
+        
+        # Store forecast data for later retrieval
+        self.forecast_data = forecast_data
+        
         await self._send_training_status_update("training_complete", {
-            "best_model": best_model.model_type,
-            "performance": best_model.performance_metrics
+            "best_model": best_model.family,
+            "performance": {"rmse": best_model.val_score},
+            "forecast_data": forecast_data
         })
         
         return best_model
@@ -670,8 +722,28 @@ class TimeSeriesTrainer:
             if model_rec.model_type == "arima":
                 forecaster = ARIMAForecaster()
                 fit_info = forecaster.auto_fit(train_series)
+                
+                # Validate that ARIMA model was fitted successfully
+                if forecaster.fitted_model is None:
+                    raise ValueError("ARIMA model failed to fit")
+                
                 forecast_result = forecaster.forecast(len(test_series))
                 forecast = forecast_result["forecast"]
+                
+                # Validate forecast
+                if forecast is None or len(forecast) == 0:
+                    raise ValueError("ARIMA forecast returned empty results")
+                
+                # Ensure forecast length matches test series length
+                if len(forecast) != len(test_series):
+                    logger.warning(f"ARIMA forecast length mismatch: expected {len(test_series)}, got {len(forecast)}")
+                    # Truncate or pad forecast to match test series length
+                    if len(forecast) > len(test_series):
+                        forecast = forecast[:len(test_series)]
+                    else:
+                        # Pad with last value
+                        last_val = forecast[-1] if len(forecast) > 0 else 0.0
+                        forecast = np.concatenate([forecast, np.full(len(test_series) - len(forecast), last_val)])
                 
             elif model_rec.model_type == "simple_moving_average":
                 window = min(7, len(train_series) // 4)  # Adaptive window
@@ -702,14 +774,12 @@ class TimeSeriesTrainer:
             model_path = self._save_ts_model(forecaster, f"{model_rec.model_type}_{self.run_id}")
             
             return ModelArtifact(
-                model_type=model_rec.model_type,
+                run_id=self.run_id,
+                family=model_rec.model_type,
                 model_path=model_path,
-                performance_metrics=metrics,
-                training_config=fit_info,
-                feature_importance=None,
-                model_size_mb=0.1,  # Placeholder
-                training_time_seconds=1.0,  # Placeholder
-                cross_validation_scores=None
+                val_score=metrics.get("rmse", 0.0),
+                train_score=0.0,  # Placeholder - we don't have train score for time series
+                feature_importance=None
             )
             
         except Exception as e:
@@ -747,14 +817,12 @@ class TimeSeriesTrainer:
         model_path = self._save_ts_model(forecaster, f"fallback_{self.run_id}")
         
         return ModelArtifact(
-            model_type="simple_moving_average",
+            run_id=self.run_id,
+            family="simple_moving_average",
             model_path=model_path,
-            performance_metrics=metrics,
-            training_config=fit_info,
-            feature_importance=None,
-            model_size_mb=0.01,
-            training_time_seconds=0.1,
-            cross_validation_scores=None
+            val_score=metrics.get("rmse", 0.0),
+            train_score=0.0,  # Placeholder - we don't have train score for time series
+            feature_importance=None
         )
     
     def _get_seasonal_period(self, ts_characteristics: Dict[str, Any]) -> int:
@@ -793,20 +861,136 @@ class TimeSeriesTrainer:
         if not trained_models:
             raise ValueError("No trained models available")
         
-        # Sort by RMSE (lower is better)
-        best_model = min(trained_models, key=lambda m: m.performance_metrics.get("rmse", float('inf')))
+        # Sort by val_score (RMSE - lower is better)
+        best_model = min(trained_models, key=lambda m: m.val_score)
         return best_model
     
+    def _make_json_serializable(self, obj: Any) -> Any:
+        """Convert numpy types and other non-JSON-serializable objects to JSON-serializable types"""
+        if isinstance(obj, dict):
+            return {k: self._make_json_serializable(v) for k, v in obj.items()}
+        elif isinstance(obj, list):
+            return [self._make_json_serializable(item) for item in obj]
+        elif isinstance(obj, (np.integer, np.floating)):
+            return float(obj)
+        elif isinstance(obj, np.ndarray):
+            return obj.tolist()
+        elif isinstance(obj, (np.bool_, bool)):
+            return bool(obj)
+        elif obj is None:
+            return None
+        else:
+            return obj
+
     async def _send_training_status_update(self, status: str, data: Dict[str, Any]):
         """Send training status update via WebSocket"""
         if self.websocket_manager:
-            await self.websocket_manager.send_progress_update(
+            # Make sure data is JSON serializable
+            serializable_data = self._make_json_serializable(data)
+            await self.websocket_manager.broadcast_training_status(
                 self.session_id, 
                 {
                     "type": "timeseries_training_update",
                     "run_id": self.run_id,
                     "status": status,
-                    "data": data,
+                    "data": serializable_data,
                     "timestamp": time.time()
                 }
-            ) 
+            )
+    
+    async def _generate_forecast_visualization_data(
+        self,
+        best_model: ModelArtifact,
+        train_df: pd.DataFrame,
+        test_df: pd.DataFrame,
+        data_pipeline: TimeSeriesDataPipeline,
+        forecast_horizon: int
+    ) -> Dict[str, Any]:
+        """Generate forecast data for visualization"""
+        
+        try:
+            # Load the trained model
+            with open(best_model.model_path, 'rb') as f:
+                forecaster = pickle.load(f)
+            
+            target_col = data_pipeline.target_column
+            date_col = data_pipeline.date_column
+            
+            # Prepare historical data
+            historical_data = []
+            train_series = train_df[target_col].dropna()
+            test_series = test_df[target_col].dropna()
+            
+            # Get dates for historical data
+            train_dates = train_df[date_col].dropna()
+            test_dates = test_df[date_col].dropna()
+            
+            # Historical training data (last 30 points for visualization)
+            train_limit = min(30, len(train_series))
+            for i in range(len(train_series) - train_limit, len(train_series)):
+                if i < len(train_dates):
+                    date = train_dates.iloc[i]
+                    value = train_series.iloc[i]
+                    historical_data.append({
+                        "date": date.isoformat() if hasattr(date, 'isoformat') else str(date),
+                        "actual": float(value),
+                        "type": "historical"
+                    })
+            
+            # Generate forecast for test period (validation)
+            forecast_result = forecaster.forecast(len(test_series))
+            forecast_values = forecast_result["forecast"]
+            
+            # Test data with predictions
+            forecast_data = []
+            for i, (date, actual, predicted) in enumerate(zip(test_dates, test_series, forecast_values)):
+                forecast_data.append({
+                    "date": date.isoformat() if hasattr(date, 'isoformat') else str(date),
+                    "actual": float(actual),
+                    "predicted": float(predicted),
+                    "type": "validation"
+                })
+            
+            # Generate future forecast
+            future_forecast = forecaster.forecast(forecast_horizon)
+            future_values = future_forecast["forecast"]
+            
+            # Generate future dates
+            last_date = test_dates.iloc[-1] if len(test_dates) > 0 else train_dates.iloc[-1]
+            future_dates = pd.date_range(start=last_date, periods=forecast_horizon + 1, freq=data_pipeline.frequency)[1:]
+            
+            # Future predictions
+            future_data = []
+            for i, (date, predicted) in enumerate(zip(future_dates, future_values)):
+                future_data.append({
+                    "date": date.isoformat() if hasattr(date, 'isoformat') else str(date),
+                    "predicted": float(predicted),
+                    "type": "future"
+                })
+            
+            # Add confidence intervals if available
+            if future_forecast.get("confidence_intervals") is not None:
+                conf_int = future_forecast["confidence_intervals"]
+                for i, data_point in enumerate(future_data):
+                    if i < len(conf_int):
+                        data_point["confidence_lower"] = float(conf_int[i][0])
+                        data_point["confidence_upper"] = float(conf_int[i][1])
+            
+            return {
+                "historical_data": historical_data,
+                "forecast_data": forecast_data,
+                "future_data": future_data,
+                "model_type": best_model.family,
+                "rmse": best_model.val_score,
+                "forecast_horizon": forecast_horizon,
+                "target_column": target_col,
+                "date_column": date_col
+            }
+            
+        except Exception as e:
+            logger.warning("Failed to generate forecast visualization data", error=str(e))
+            return {
+                "error": f"Failed to generate forecast visualization: {str(e)}",
+                "model_type": best_model.family,
+                "rmse": best_model.val_score
+            } 

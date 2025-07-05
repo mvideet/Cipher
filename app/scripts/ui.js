@@ -11,6 +11,11 @@ class UIManager {
         this.currentSuggestions = [];
         this.currentDataProfile = null; // Track current data profile
         
+        // Chart instances for proper cleanup
+        this.forecastChartInstance = null;
+        this.clusterChartInstance = null;
+        this.featureImportanceChartInstance = null;
+        
         // NEW: Track individual architectures for each family
         this.familyArchitectures = {}; // Structure: { family: { archName: { metrics, status, etc. } } }
     }
@@ -1692,6 +1697,24 @@ class UIManager {
             this.showClusteringResults(results);
             
             this.showNotification('success', 'Clustering Complete', `Found ${results.n_clusters} clusters using ${results.best_algorithm}`);
+        } else if (results.forecasting_results) {
+            // Forecasting results
+            const bestModel = results.best_model;
+            document.getElementById('bestFamily').textContent = bestModel.family || 'Time Series';
+            document.getElementById('bestScore').textContent = formatNumber(bestModel.val_score);
+            document.getElementById('trainScore').textContent = 'RMSE';
+            
+            // Update labels for forecasting
+            const scoreLabel = document.querySelector('label[for="bestScore"]');
+            if (scoreLabel) scoreLabel.textContent = 'RMSE Score:';
+            
+            const trainLabel = document.querySelector('label[for="trainScore"]');
+            if (trainLabel) trainLabel.textContent = 'Metric Type:';
+            
+            // Show forecasting-specific visualization
+            this.showForecastingResults(results);
+            
+            this.showNotification('success', 'Forecasting Complete', `Best model: ${bestModel.family} with RMSE ${formatNumber(bestModel.val_score)}`);
         } else if (results.best_model) {
             // Supervised learning results
             const bestModel = results.best_model;
@@ -1734,17 +1757,27 @@ class UIManager {
         // Show/hide appropriate sections
         const clusteringSection = document.getElementById('clusteringResults');
         const supervisedSection = document.getElementById('supervisedExplanations');
+        const forecastingSection = document.getElementById('forecastingResults');
         
         if (results.clustering_results) {
             if (clusteringSection) clusteringSection.style.display = 'block';
             if (supervisedSection) supervisedSection.style.display = 'none';
+            if (forecastingSection) forecastingSection.style.display = 'none';
+        } else if (results.forecasting_results) {
+            if (clusteringSection) clusteringSection.style.display = 'none';
+            if (supervisedSection) supervisedSection.style.display = 'none';
+            if (forecastingSection) forecastingSection.style.display = 'block';
         } else {
             if (clusteringSection) clusteringSection.style.display = 'none';
             if (supervisedSection) supervisedSection.style.display = 'block';
+            if (forecastingSection) forecastingSection.style.display = 'none';
         }
 
         // Update session status
-        this.updateSessionStatus('completed', results.clustering_results ? 'Clustering completed' : 'Training completed');
+        const statusText = results.clustering_results ? 'Clustering completed' : 
+                          results.forecasting_results ? 'Forecasting completed' : 
+                          'Training completed';
+        this.updateSessionStatus('completed', statusText);
     }
 
     // Show clustering results with visualization
@@ -1761,22 +1794,79 @@ class UIManager {
         this.createClusterTable(results);
     }
 
+    // Show forecasting results with visualization
+    showForecastingResults(results) {
+        console.log('🔮 Showing forecasting results:', results);
+        
+        // Hide other result sections first
+        const clusteringSection = document.getElementById('clusteringResults');
+        const supervisedSection = document.getElementById('supervisedExplanations');
+        if (clusteringSection) clusteringSection.style.display = 'none';
+        if (supervisedSection) supervisedSection.style.display = 'none';
+        
+        // Show forecasting section
+        const forecastingSection = document.getElementById('forecastingResults');
+        if (!forecastingSection) {
+            console.error('❌ Forecasting results section not found');
+            return;
+        }
+        
+        forecastingSection.style.display = 'block';
+        console.log('✅ Forecasting section made visible');
+
+        const bestModel = results.best_model;
+        const selectedModels = results.selected_models || [];
+        
+        // Update basic stats
+        const modelTypeElement = document.getElementById('forecastModelType');
+        const rmseScoreElement = document.getElementById('forecastRMSE');
+        const modelsTestedElement = document.getElementById('modelsTestedCount');
+        
+        if (modelTypeElement) {
+            modelTypeElement.textContent = bestModel.family || 'Unknown';
+            console.log('✅ Updated forecast model type:', bestModel.family);
+        }
+        if (rmseScoreElement) {
+            rmseScoreElement.textContent = formatNumber(bestModel.val_score) || '-';
+            console.log('✅ Updated RMSE score:', bestModel.val_score);
+        }
+        if (modelsTestedElement) {
+            modelsTestedElement.textContent = selectedModels.length || '-';
+            console.log('✅ Updated models tested count:', selectedModels.length);
+        }
+        
+        // Show forecast visualization placeholder
+        this.createForecastChart(results);
+        
+        // Create forecast summary table
+        this.createForecastTable(results);
+        
+        console.log('🎯 Forecasting results display complete');
+    }
+
     // Create cluster distribution chart
     createClusterChart(results) {
         const ctx = document.getElementById('clusterChart');
         if (!ctx) return;
         
+        // Destroy existing chart if it exists
+        if (this.clusterChartInstance) {
+            this.clusterChartInstance.destroy();
+            this.clusterChartInstance = null;
+        }
+        
         // Clear existing content
         ctx.innerHTML = '';
         
-        // Create canvas
+        // Create canvas with unique ID
         const canvas = document.createElement('canvas');
+        canvas.id = 'clusterCanvas_' + Date.now();
         ctx.appendChild(canvas);
         
         // Generate mock cluster data for visualization
         const clusterData = this.generateClusterData(results.n_clusters);
         
-        new Chart(canvas, {
+        this.clusterChartInstance = new Chart(canvas, {
             type: 'doughnut',
             data: {
                 labels: clusterData.labels,
@@ -2055,17 +2145,24 @@ class UIManager {
         const ctx = document.getElementById('featureImportanceChart');
         if (!ctx) return;
         
+        // Destroy existing chart if it exists
+        if (this.featureImportanceChartInstance) {
+            this.featureImportanceChartInstance.destroy();
+            this.featureImportanceChartInstance = null;
+        }
+        
         // Clear existing content
         ctx.innerHTML = '';
         
-        // Create canvas
+        // Create canvas with unique ID
         const canvas = document.createElement('canvas');
+        canvas.id = 'featureImportanceCanvas_' + Date.now();
         ctx.appendChild(canvas);
         
         const features = Object.keys(featureImportance).slice(0, 10); // Top 10
         const values = features.map(f => featureImportance[f]);
         
-        new Chart(canvas, {
+        this.featureImportanceChartInstance = new Chart(canvas, {
             type: 'bar',
             data: {
                 labels: features,
@@ -2101,6 +2198,382 @@ class UIManager {
                 }
             }
         });
+    }
+
+    // Create forecast chart
+    createForecastChart(results) {
+        const ctx = document.getElementById('forecastChart');
+        if (!ctx) return;
+        
+        // Destroy existing chart if it exists
+        if (this.forecastChartInstance) {
+            this.forecastChartInstance.destroy();
+            this.forecastChartInstance = null;
+        }
+        
+        // Clear existing content
+        ctx.innerHTML = '';
+        
+        // Check if forecast data is available
+        if (!results.forecast_data || results.forecast_data.error) {
+            // Show error or placeholder
+            const placeholder = document.createElement('div');
+            placeholder.className = 'chart-placeholder';
+            placeholder.innerHTML = `
+                <div style="text-align: center; padding: 40px; color: #64748b;">
+                    <i class="fas fa-chart-line" style="font-size: 48px; margin-bottom: 16px;"></i>
+                    <h4 style="margin: 0 0 8px 0;">Forecast Visualization</h4>
+                    <p style="margin: 0; font-size: 14px;">${results.forecast_data?.error || 'Forecast data not available'}</p>
+                    <small style="color: #94a3b8;">Model: ${results.best_model?.family || 'Unknown'}</small>
+                </div>
+            `;
+            ctx.appendChild(placeholder);
+            return;
+        }
+        
+        // Create canvas for Chart.js with unique ID
+        const canvas = document.createElement('canvas');
+        canvas.id = 'forecastCanvas_' + Date.now();
+        ctx.appendChild(canvas);
+        
+        try {
+            // Prepare data for Chart.js
+            const forecastData = results.forecast_data;
+            const datasets = [];
+            const labels = [];
+            
+            // Historical data
+            if (forecastData.historical_data && forecastData.historical_data.length > 0) {
+                const historicalLabels = forecastData.historical_data.map(d => d.date);
+                const historicalValues = forecastData.historical_data.map(d => d.actual);
+                
+                labels.push(...historicalLabels);
+                datasets.push({
+                    label: 'Historical',
+                    data: historicalValues.map((value, index) => ({
+                        x: historicalLabels[index],
+                        y: value
+                    })),
+                    borderColor: '#3b82f6',
+                    backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                    fill: false,
+                    tension: 0.1
+                });
+            }
+            
+            // Validation data (actual vs predicted)
+            if (forecastData.forecast_data && forecastData.forecast_data.length > 0) {
+                const validationLabels = forecastData.forecast_data.map(d => d.date);
+                const actualValues = forecastData.forecast_data.map(d => d.actual);
+                const predictedValues = forecastData.forecast_data.map(d => d.predicted);
+                
+                // Add validation labels to main labels if not already present
+                validationLabels.forEach(label => {
+                    if (!labels.includes(label)) {
+                        labels.push(label);
+                    }
+                });
+                
+                datasets.push({
+                    label: 'Actual (Validation)',
+                    data: actualValues.map((value, index) => ({
+                        x: validationLabels[index],
+                        y: value
+                    })),
+                    borderColor: '#10b981',
+                    backgroundColor: 'rgba(16, 185, 129, 0.1)',
+                    fill: false,
+                    tension: 0.1
+                });
+                
+                datasets.push({
+                    label: 'Predicted (Validation)',
+                    data: predictedValues.map((value, index) => ({
+                        x: validationLabels[index],
+                        y: value
+                    })),
+                    borderColor: '#f59e0b',
+                    backgroundColor: 'rgba(245, 158, 11, 0.1)',
+                    fill: false,
+                    tension: 0.1,
+                    borderDash: [5, 5]
+                });
+            }
+            
+            // Future forecast
+            if (forecastData.future_data && forecastData.future_data.length > 0) {
+                const futureLabels = forecastData.future_data.map(d => d.date);
+                const futureValues = forecastData.future_data.map(d => d.predicted);
+                
+                // Add future labels to main labels
+                futureLabels.forEach(label => {
+                    if (!labels.includes(label)) {
+                        labels.push(label);
+                    }
+                });
+                
+                datasets.push({
+                    label: 'Future Forecast',
+                    data: futureValues.map((value, index) => ({
+                        x: futureLabels[index],
+                        y: value
+                    })),
+                    borderColor: '#ef4444',
+                    backgroundColor: 'rgba(239, 68, 68, 0.1)',
+                    fill: false,
+                    tension: 0.1,
+                    borderDash: [10, 5]
+                });
+                
+                // Add confidence intervals if available
+                const hasConfidence = forecastData.future_data.some(d => d.confidence_lower !== undefined);
+                if (hasConfidence) {
+                    const confidenceUpper = forecastData.future_data.map(d => d.confidence_upper || d.predicted);
+                    const confidenceLower = forecastData.future_data.map(d => d.confidence_lower || d.predicted);
+                    
+                    datasets.push({
+                        label: 'Confidence Interval',
+                        data: confidenceUpper.map((value, index) => ({
+                            x: futureLabels[index],
+                            y: value
+                        })),
+                        borderColor: 'rgba(239, 68, 68, 0.3)',
+                        backgroundColor: 'rgba(239, 68, 68, 0.1)',
+                        fill: '+1',
+                        tension: 0.1,
+                        pointRadius: 0
+                    });
+                    
+                    datasets.push({
+                        label: 'Confidence Lower',
+                        data: confidenceLower.map((value, index) => ({
+                            x: futureLabels[index],
+                            y: value
+                        })),
+                        borderColor: 'rgba(239, 68, 68, 0.3)',
+                        backgroundColor: 'rgba(239, 68, 68, 0.1)',
+                        fill: false,
+                        tension: 0.1,
+                        pointRadius: 0
+                    });
+                }
+            }
+            
+            // Try to create the chart with time scale, fallback to linear if it fails
+            try {
+                this.forecastChartInstance = new Chart(canvas, {
+                    type: 'line',
+                    data: {
+                        datasets: datasets
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                            title: {
+                                display: true,
+                                text: `${forecastData.target_column} Forecast - ${forecastData.model_type}`,
+                                font: {
+                                    size: 16
+                                }
+                            },
+                            legend: {
+                                display: true,
+                                position: 'top'
+                            },
+                            tooltip: {
+                                mode: 'index',
+                                intersect: false,
+                                callbacks: {
+                                    title: function(context) {
+                                        try {
+                                            return new Date(context[0].parsed.x).toLocaleDateString();
+                                        } catch {
+                                            return context[0].label || '';
+                                        }
+                                    },
+                                    label: function(context) {
+                                        return `${context.dataset.label}: ${context.parsed.y.toFixed(2)}`;
+                                    }
+                                }
+                            }
+                        },
+                        scales: {
+                            x: {
+                                type: 'time',
+                                time: {
+                                    parser: 'YYYY-MM-DD',
+                                    tooltipFormat: 'MMM dd, yyyy',
+                                    displayFormats: {
+                                        day: 'MMM dd',
+                                        week: 'MMM dd',
+                                        month: 'MMM yyyy'
+                                    }
+                                },
+                                title: {
+                                    display: true,
+                                    text: forecastData.date_column || 'Date'
+                                }
+                            },
+                            y: {
+                                title: {
+                                    display: true,
+                                    text: forecastData.target_column || 'Value'
+                                }
+                            }
+                        },
+                        interaction: {
+                            mode: 'nearest',
+                            axis: 'x',
+                            intersect: false
+                        }
+                    }
+                });
+            } catch (timeScaleError) {
+                console.warn('Time scale failed, using linear scale:', timeScaleError);
+                
+                // Fallback: Create simpler chart with linear scale and formatted labels
+                const allLabels = [];
+                const allData = [];
+                
+                // Collect all data points with simplified labels
+                datasets.forEach(dataset => {
+                    dataset.data.forEach(point => {
+                        const dateLabel = new Date(point.x).toLocaleDateString();
+                        if (!allLabels.includes(dateLabel)) {
+                            allLabels.push(dateLabel);
+                        }
+                    });
+                });
+                
+                // Sort labels chronologically
+                allLabels.sort((a, b) => new Date(a) - new Date(b));
+                
+                // Convert datasets to use label indices
+                const simplifiedDatasets = datasets.map(dataset => ({
+                    ...dataset,
+                    data: dataset.data.map(point => {
+                        const dateLabel = new Date(point.x).toLocaleDateString();
+                        const index = allLabels.indexOf(dateLabel);
+                        return { x: index, y: point.y };
+                    })
+                }));
+                
+                this.forecastChartInstance = new Chart(canvas, {
+                    type: 'line',
+                    data: {
+                        labels: allLabels,
+                        datasets: simplifiedDatasets
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                            title: {
+                                display: true,
+                                text: `${forecastData.target_column} Forecast - ${forecastData.model_type}`,
+                                font: {
+                                    size: 16
+                                }
+                            },
+                            legend: {
+                                display: true,
+                                position: 'top'
+                            },
+                            tooltip: {
+                                mode: 'index',
+                                intersect: false,
+                                callbacks: {
+                                    title: function(context) {
+                                        return context[0].label || '';
+                                    },
+                                    label: function(context) {
+                                        return `${context.dataset.label}: ${context.parsed.y.toFixed(2)}`;
+                                    }
+                                }
+                            }
+                        },
+                        scales: {
+                            x: {
+                                title: {
+                                    display: true,
+                                    text: forecastData.date_column || 'Date'
+                                },
+                                ticks: {
+                                    maxTicksLimit: 10,
+                                    callback: function(value, index) {
+                                        // Show every nth label to avoid crowding
+                                        const step = Math.ceil(allLabels.length / 8);
+                                        return index % step === 0 ? allLabels[index] : '';
+                                    }
+                                }
+                            },
+                            y: {
+                                title: {
+                                    display: true,
+                                    text: forecastData.target_column || 'Value'
+                                }
+                            }
+                        },
+                        interaction: {
+                            mode: 'nearest',
+                            axis: 'x',
+                            intersect: false
+                        }
+                    }
+                });
+            }
+            
+        } catch (error) {
+            console.error('Error creating forecast chart:', error);
+            
+            // Show error message
+            ctx.innerHTML = `
+                <div style="text-align: center; padding: 40px; color: #ef4444;">
+                    <i class="fas fa-exclamation-triangle" style="font-size: 48px; margin-bottom: 16px;"></i>
+                    <h4 style="margin: 0 0 8px 0;">Chart Error</h4>
+                    <p style="margin: 0; font-size: 14px;">Failed to create forecast visualization</p>
+                    <small style="color: #94a3b8;">Error: ${error.message}</small>
+                </div>
+            `;
+        }
+    }
+
+    // Create forecast summary table
+    createForecastTable(results) {
+        const tableContainer = document.getElementById('forecastTable');
+        if (!tableContainer) return;
+        
+        const bestModel = results.best_model;
+        const selectedModels = results.selected_models || [];
+        
+        tableContainer.innerHTML = `
+            <div class="forecast-summary-table">
+                <h4 style="margin-bottom: 16px; color: #1e293b;">Forecast Summary</h4>
+                <table class="summary-table">
+                    <tr>
+                        <td><strong>Best Model</strong></td>
+                        <td>${bestModel?.family || 'Unknown'}</td>
+                    </tr>
+                    <tr>
+                        <td><strong>RMSE Score</strong></td>
+                        <td>${formatNumber(bestModel?.val_score) || 'N/A'}</td>
+                    </tr>
+                    <tr>
+                        <td><strong>Models Tested</strong></td>
+                        <td>${selectedModels.length}</td>
+                    </tr>
+                    <tr>
+                        <td><strong>Training Method</strong></td>
+                        <td>${results.training_method || 'Time Series Forecasting'}</td>
+                    </tr>
+                    <tr>
+                        <td><strong>Selected Models</strong></td>
+                        <td>${selectedModels.join(', ') || 'Auto-selected'}</td>
+                    </tr>
+                </table>
+            </div>
+        `;
     }
 
     // Deploy model
@@ -2397,26 +2870,50 @@ class UIManager {
         let modelCard = document.getElementById(`enhanced-${modelName}`);
         
         if (!modelCard) {
+            // Check if this is a time series model to customize the card
+            const isTimeSeriesModel = ['arima', 'prophet', 'exponential_smoothing', 'lstm_ts', 'seasonal_decompose'].includes(modelName.toLowerCase());
+            
             modelCard = document.createElement('div');
             modelCard.id = `enhanced-${modelName}`;
             modelCard.className = 'enhanced-model-card';
-            modelCard.innerHTML = `
-                <h5>${modelName}</h5>
-                <div class="enhanced-model-details">
-                    <div class="enhanced-stat">
-                        <span class="label">Architectures Tested:</span>
-                        <span class="value">0</span>
+            
+            if (isTimeSeriesModel) {
+                modelCard.innerHTML = `
+                    <h5>${modelName.replace('_', ' ').toUpperCase()}</h5>
+                    <div class="enhanced-model-details">
+                        <div class="enhanced-stat">
+                            <span class="label">Training Progress:</span>
+                            <span class="value">0%</span>
+                        </div>
+                        <div class="enhanced-stat">
+                            <span class="label">RMSE Score:</span>
+                            <span class="value">-</span>
+                        </div>
+                        <div class="enhanced-stat">
+                            <span class="label">Status:</span>
+                            <span class="status running">Training</span>
+                        </div>
                     </div>
-                    <div class="enhanced-stat">
-                        <span class="label">Best Score:</span>
-                        <span class="value">-</span>
+                `;
+            } else {
+                modelCard.innerHTML = `
+                    <h5>${modelName}</h5>
+                    <div class="enhanced-model-details">
+                        <div class="enhanced-stat">
+                            <span class="label">Architectures Tested:</span>
+                            <span class="value">0</span>
+                        </div>
+                        <div class="enhanced-stat">
+                            <span class="label">Best Score:</span>
+                            <span class="value">-</span>
+                        </div>
+                        <div class="enhanced-stat">
+                            <span class="label">Status:</span>
+                            <span class="status running">Training</span>
+                        </div>
                     </div>
-                    <div class="enhanced-stat">
-                        <span class="label">Status:</span>
-                        <span class="status running">Training</span>
-                    </div>
-                </div>
-            `;
+                `;
+            }
             container.appendChild(modelCard);
         }
 
@@ -2425,22 +2922,47 @@ class UIManager {
         const scoreElement = modelCard.querySelector('.enhanced-stat:nth-child(2) .value');
         const statusElement = modelCard.querySelector('.status');
 
+        const isTimeSeriesModel = ['arima', 'prophet', 'exponential_smoothing', 'lstm_ts', 'seasonal_decompose'].includes(modelName.toLowerCase());
+
         if (data.trial) {
-            trialsElement.textContent = data.trial;
-            
-            // Auto-complete logic: mark as completed after 15+ trials
-            if (data.trial >= 15 && data.val_metric !== undefined) {
-                statusElement.textContent = 'Completed';
-                statusElement.className = 'status completed';
-                console.log(`✅ Auto-completed ${modelName} after ${data.trial} trials`);
-            } else if (data.trial >= 10) {
-                statusElement.textContent = 'Training';
-                statusElement.className = 'status training';
+            if (isTimeSeriesModel) {
+                // For time series models, show progress percentage
+                const progress = Math.min(100, (data.trial / 5) * 100); // Assume 5 steps for completion
+                trialsElement.textContent = `${Math.round(progress)}%`;
+                
+                if (progress >= 100) {
+                    statusElement.textContent = 'Completed';
+                    statusElement.className = 'status completed';
+                }
+            } else {
+                trialsElement.textContent = data.trial;
+                
+                // Auto-complete logic: mark as completed after 15+ trials
+                if (data.trial >= 15 && data.val_metric !== undefined) {
+                    statusElement.textContent = 'Completed';
+                    statusElement.className = 'status completed';
+                    console.log(`✅ Auto-completed ${modelName} after ${data.trial} trials`);
+                } else if (data.trial >= 10) {
+                    statusElement.textContent = 'Training';
+                    statusElement.className = 'status training';
+                }
             }
         }
 
         if (data.val_metric !== undefined) {
             scoreElement.textContent = formatNumber(data.val_metric);
+        }
+        
+        // Handle time series specific status updates
+        if (isTimeSeriesModel && data.status) {
+            if (data.status === 'completed' || data.status === 'training_complete') {
+                statusElement.textContent = 'Completed';
+                statusElement.className = 'status completed';
+                trialsElement.textContent = '100%';
+            } else if (data.status === 'training_model') {
+                statusElement.textContent = 'Training';
+                statusElement.className = 'status training';
+            }
         }
     }
 

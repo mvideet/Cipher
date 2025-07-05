@@ -323,6 +323,42 @@
                             </div>
                         </div>
 
+                        <!-- Forecasting Results Section -->
+                        <div id="forecastingResults" class="forecasting-results" style="display: none;">
+                            <h3>Forecast Analysis</h3>
+                            <div class="forecasting-content">
+                                <div class="forecast-overview">
+                                    <div class="forecast-stats">
+                                        <div class="stat-card">
+                                            <h4>Best Model</h4>
+                                            <span id="forecastModelType" class="stat-value">-</span>
+                                        </div>
+                                        <div class="stat-card">
+                                            <h4>RMSE Score</h4>
+                                            <span id="forecastRMSE" class="stat-value">-</span>
+                                        </div>
+                                        <div class="stat-card">
+                                            <h4>Models Tested</h4>
+                                            <span id="modelsTestedCount" class="stat-value">-</span>
+                                        </div>
+                                    </div>
+                                </div>
+                                
+                                <div class="forecast-visualization">
+                                    <h4>Forecast Chart</h4>
+                                    <div id="forecastChart" class="chart-container">
+                                        <!-- Forecast chart will be rendered here -->
+                                    </div>
+                                </div>
+                                
+                                <div class="forecast-summary">
+                                    <div id="forecastTable">
+                                        <!-- Forecast summary table will be rendered here -->
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
                         <!-- Supervised Learning Explanations Section -->
                         <div id="supervisedExplanations" class="explanations">
                             <h3>Model Explanations</h3>
@@ -423,6 +459,7 @@
 
     <!-- Scripts -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
     <script src="scripts/utils.js"></script>
     <script src="scripts/api.js"></script>
     <script src="scripts/ui.js"></script>

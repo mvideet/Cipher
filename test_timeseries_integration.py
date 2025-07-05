@@ -9,7 +9,7 @@ import sys
 import os
 
 # Add the src directory to path for imports
-sys.path.append(os.path.join(os.path.dirname(__file__), 'src'))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
 
 def create_sample_time_series_data():
     """Create sample time series data for testing"""
@@ -59,7 +59,7 @@ def test_time_series_profiling():
     
     # Test basic data profiling
     try:
-        from ml.data_profiler import DataProfiler
+        from src.ml.data_profiler import DataProfiler
         
         profiler = DataProfiler()
         
@@ -89,7 +89,7 @@ def test_time_series_data_pipeline():
     print("\n🧪 Testing Time Series Data Pipeline...")
     
     try:
-        from ml.timeseries_trainer import TimeSeriesDataPipeline
+        from src.ml.timeseries_trainer import TimeSeriesDataPipeline
         
         # Create sample data
         df = create_sample_time_series_data()
@@ -118,7 +118,7 @@ def test_time_series_metrics():
     print("\n🧪 Testing Time Series Metrics...")
     
     try:
-        from ml.timeseries_trainer import TimeSeriesMetrics
+        from src.ml.timeseries_trainer import TimeSeriesMetrics
         
         # Create sample actual and forecast data
         actual = np.array([100, 110, 105, 115, 120, 125, 130, 135])
