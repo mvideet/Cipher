@@ -76,11 +76,15 @@ function startBackend() {
   // Start the Python backend
   console.log('Starting Python backend...');
   
-  const pythonPath = process.platform === 'win32' ? 'python' : 'python3';
+  const poetryCommand = process.platform === 'win32' ? 'poetry.exe' : 'poetry';
   
-  backendProcess = spawn(pythonPath, ['-m', 'uvicorn', 'src.main:app', '--host', '127.0.0.1', '--port', '8001'], {
+  backendProcess = spawn(poetryCommand, ['run', 'python', '-m', 'uvicorn', 'src.main:app', '--host', '127.0.0.1', '--port', '8001'], {
     cwd: process.cwd(),
-    stdio: ['pipe', 'pipe', 'pipe']
+    stdio: ['pipe', 'pipe', 'pipe'],
+    env: {
+      ...process.env,
+      PATH: `/opt/homebrew/bin:${process.env.PATH}`
+    }
   });
 
   backendProcess.stdout.on('data', (data) => {
@@ -102,7 +106,7 @@ function startBackend() {
     if (mainWindow) {
       dialog.showErrorBox(
         'Backend Error',
-        `Failed to start Python backend: ${error.message}\n\nPlease ensure Python and dependencies are installed.`
+        `Failed to start Python backend: ${error.message}\n\nPlease ensure Poetry and dependencies are installed.`
       );
     }
   });

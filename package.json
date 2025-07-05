@@ -6,7 +6,7 @@
   "scripts": {
     "start": "electron .",
     "dev": "concurrently \"npm run backend\" \"electron .\"",
-    "backend": "venv/bin/python -m uvicorn src.main:app --reload --port 8001 --host 127.0.0.1",
+    "backend": "poetry run python -m uvicorn src.main:app --reload --port 8001 --host 127.0.0.1",
     "build": "electron-builder",
     "pack": "electron-builder --dir",
     "dist": "electron-builder"

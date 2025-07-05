@@ -17,6 +17,8 @@ except ImportError:
     STATSMODELS_AVAILABLE = False
     import warnings
     warnings.warn("Statsmodels not available for advanced time series analysis")
+    import warnings
+    warnings.warn("Statsmodels not available for advanced time series analysis")
 
 # Define DataProfile class locally since we can't import it
 class DataProfile:
