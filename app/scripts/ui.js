@@ -35,6 +35,11 @@ class UIManager {
         // ELECTRON FIX: Add global event delegation for family card clicks
         this.setupFamilyCardEventDelegation();
         
+        // Clean up charts when page is unloaded
+        window.addEventListener('beforeunload', () => {
+            this.destroyAllCharts();
+        });
+        
         console.log('✅ UI Manager initialized successfully (Electron-compatible)');
     }
     
@@ -1849,59 +1854,84 @@ class UIManager {
         const ctx = document.getElementById('clusterChart');
         if (!ctx) return;
         
-        // Destroy existing chart if it exists
-        if (this.clusterChartInstance) {
-            this.clusterChartInstance.destroy();
-            this.clusterChartInstance = null;
-        }
+        console.log('📊 Creating cluster chart...');
         
-        // Clear existing content
+        // Aggressive cleanup before creating new chart
+        this.cleanupChartsInContainer(ctx, 'cluster');
+        
+        // Clear existing content completely
         ctx.innerHTML = '';
         
-        // Create canvas with unique ID
+        // Small delay to ensure cleanup is complete
+        setTimeout(() => {
+            this.actuallyCreateClusterChart(ctx, results);
+        }, 100);
+    }
+    
+    // Actually create the cluster chart (separated for timing)
+    actuallyCreateClusterChart(ctx, results) {
+        // Create canvas with unique ID and ensure no conflicts
         const canvas = document.createElement('canvas');
-        canvas.id = 'clusterCanvas_' + Date.now();
+        canvas.id = 'clusterCanvas_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
         ctx.appendChild(canvas);
         
-        // Generate mock cluster data for visualization
-        const clusterData = this.generateClusterData(results.n_clusters);
+        console.log(`📊 Created cluster canvas with ID: ${canvas.id}`);
         
-        this.clusterChartInstance = new Chart(canvas, {
-            type: 'doughnut',
-            data: {
-                labels: clusterData.labels,
-                datasets: [{
-                    data: clusterData.sizes,
-                    backgroundColor: [
-                        '#3b82f6', '#ef4444', '#10b981', '#f59e0b', '#8b5cf6',
-                        '#06b6d4', '#84cc16', '#f97316', '#ec4899', '#6b7280'
-                    ].slice(0, results.n_clusters),
-                    borderWidth: 2,
-                    borderColor: '#ffffff'
-                }]
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                plugins: {
-                    legend: {
-                        position: 'right',
-                        labels: {
-                            usePointStyle: true,
-                            padding: 20
-                        }
-                    },
-                    tooltip: {
-                        callbacks: {
-                            label: function(context) {
-                                const percentage = ((context.parsed / clusterData.total) * 100).toFixed(1);
-                                return `${context.label}: ${context.parsed} records (${percentage}%)`;
+        try {
+            // Generate mock cluster data for visualization
+            const clusterData = this.generateClusterData(results.n_clusters);
+            
+            console.log('🎯 Creating cluster Chart.js instance...');
+            this.clusterChartInstance = new Chart(canvas, {
+                type: 'doughnut',
+                data: {
+                    labels: clusterData.labels,
+                    datasets: [{
+                        data: clusterData.sizes,
+                        backgroundColor: [
+                            '#3b82f6', '#ef4444', '#10b981', '#f59e0b', '#8b5cf6',
+                            '#06b6d4', '#84cc16', '#f97316', '#ec4899', '#6b7280'
+                        ].slice(0, results.n_clusters),
+                        borderWidth: 2,
+                        borderColor: '#ffffff'
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            position: 'right',
+                            labels: {
+                                usePointStyle: true,
+                                padding: 20
+                            }
+                        },
+                        tooltip: {
+                            callbacks: {
+                                label: function(context) {
+                                    const percentage = ((context.parsed / clusterData.total) * 100).toFixed(1);
+                                    return `${context.label}: ${context.parsed} records (${percentage}%)`;
+                                }
                             }
                         }
                     }
                 }
-            }
-        });
+            });
+            console.log('✅ Cluster Chart.js instance created successfully');
+        } catch (error) {
+            console.error('❌ Error creating cluster chart:', error);
+            
+            // Show error message
+            ctx.innerHTML = `
+                <div style="text-align: center; padding: 40px; color: #ef4444;">
+                    <i class="fas fa-exclamation-triangle" style="font-size: 48px; margin-bottom: 16px;"></i>
+                    <h4 style="margin: 0 0 8px 0;">Chart Error</h4>
+                    <p style="margin: 0; font-size: 14px;">Failed to create cluster visualization</p>
+                    <small style="color: #94a3b8;">Error: ${error.message}</small>
+                </div>
+            `;
+        }
     }
 
     // Generate mock cluster data for visualization
@@ -2145,59 +2175,84 @@ class UIManager {
         const ctx = document.getElementById('featureImportanceChart');
         if (!ctx) return;
         
-        // Destroy existing chart if it exists
-        if (this.featureImportanceChartInstance) {
-            this.featureImportanceChartInstance.destroy();
-            this.featureImportanceChartInstance = null;
-        }
+        console.log('📊 Creating feature importance chart...');
         
-        // Clear existing content
+        // Aggressive cleanup before creating new chart
+        this.cleanupChartsInContainer(ctx, 'featureImportance');
+        
+        // Clear existing content completely
         ctx.innerHTML = '';
         
-        // Create canvas with unique ID
+        // Small delay to ensure cleanup is complete
+        setTimeout(() => {
+            this.actuallyCreateFeatureImportanceChart(ctx, featureImportance);
+        }, 100);
+    }
+    
+    // Actually create the feature importance chart (separated for timing)
+    actuallyCreateFeatureImportanceChart(ctx, featureImportance) {
+        // Create canvas with unique ID and ensure no conflicts
         const canvas = document.createElement('canvas');
-        canvas.id = 'featureImportanceCanvas_' + Date.now();
+        canvas.id = 'featureImportanceCanvas_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
         ctx.appendChild(canvas);
         
-        const features = Object.keys(featureImportance).slice(0, 10); // Top 10
-        const values = features.map(f => featureImportance[f]);
+        console.log(`📊 Created feature importance canvas with ID: ${canvas.id}`);
         
-        this.featureImportanceChartInstance = new Chart(canvas, {
-            type: 'bar',
-            data: {
-                labels: features,
-                datasets: [{
-                    label: 'Feature Importance',
-                    data: values,
-                    backgroundColor: features.map((_, i) => getChartColor(i)),
-                    borderWidth: 0
-                }]
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                plugins: {
-                    legend: {
-                        display: false
-                    }
+        try {
+            const features = Object.keys(featureImportance).slice(0, 10); // Top 10
+            const values = features.map(f => featureImportance[f]);
+            
+            console.log('🎯 Creating feature importance Chart.js instance...');
+            this.featureImportanceChartInstance = new Chart(canvas, {
+                type: 'bar',
+                data: {
+                    labels: features,
+                    datasets: [{
+                        label: 'Feature Importance',
+                        data: values,
+                        backgroundColor: features.map((_, i) => getChartColor(i)),
+                        borderWidth: 0
+                    }]
                 },
-                scales: {
-                    y: {
-                        beginAtZero: true,
-                        title: {
-                            display: true,
-                            text: 'Importance Score'
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            display: false
                         }
                     },
-                    x: {
-                        title: {
-                            display: true,
-                            text: 'Features'
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            title: {
+                                display: true,
+                                text: 'Importance Score'
+                            }
+                        },
+                        x: {
+                            title: {
+                                display: true,
+                                text: 'Features'
+                            }
                         }
                     }
                 }
-            }
-        });
+            });
+            console.log('✅ Feature importance Chart.js instance created successfully');
+        } catch (error) {
+            console.error('❌ Error creating feature importance chart:', error);
+            
+            // Show error message
+            ctx.innerHTML = `
+                <div style="text-align: center; padding: 40px; color: #ef4444;">
+                    <i class="fas fa-exclamation-triangle" style="font-size: 48px; margin-bottom: 16px;"></i>
+                    <h4 style="margin: 0 0 8px 0;">Chart Error</h4>
+                    <p style="margin: 0; font-size: 14px;">Failed to create feature importance visualization</p>
+                    <small style="color: #94a3b8;">Error: ${error.message}</small>
+                </div>
+            `;
+        }
     }
 
     // Create forecast chart
@@ -2205,14 +2260,70 @@ class UIManager {
         const ctx = document.getElementById('forecastChart');
         if (!ctx) return;
         
-        // Destroy existing chart if it exists
-        if (this.forecastChartInstance) {
-            this.forecastChartInstance.destroy();
-            this.forecastChartInstance = null;
+        console.log('📊 Creating forecast chart...');
+        
+        // Aggressive cleanup before creating new chart
+        this.cleanupChartsInContainer(ctx, 'forecast');
+        
+        // Clear existing content completely
+        ctx.innerHTML = '';
+        
+        // Small delay to ensure cleanup is complete
+        setTimeout(() => {
+            this.actuallyCreateForecastChart(ctx, results);
+        }, 100);
+    }
+    
+    // Helper method to clean up charts in a specific container
+    cleanupChartsInContainer(container, chartType) {
+        console.log(`🧹 Cleaning up ${chartType} charts in container...`);
+        
+        // Destroy tracked instance
+        const instanceProp = `${chartType}ChartInstance`;
+        if (this[instanceProp]) {
+            try {
+                this[instanceProp].destroy();
+                console.log(`✅ Destroyed tracked ${chartType} chart`);
+            } catch (e) {
+                console.warn(`⚠️ Error destroying ${chartType} chart:`, e);
+            }
+            this[instanceProp] = null;
         }
         
-        // Clear existing content
-        ctx.innerHTML = '';
+        // Destroy any existing Chart.js instances in the container
+        const existingCanvases = container.querySelectorAll('canvas');
+        existingCanvases.forEach((canvas, index) => {
+            try {
+                const chartInstance = Chart.getChart(canvas);
+                if (chartInstance) {
+                    console.log(`🗑️ Destroying chart instance in ${chartType} container canvas ${index}`);
+                    chartInstance.destroy();
+                }
+            } catch (e) {
+                console.warn(`⚠️ Error destroying chart in canvas ${index}:`, e);
+            }
+        });
+        
+        // Force cleanup of any Chart.js instances that might be lingering
+        try {
+            if (typeof Chart !== 'undefined' && Chart.instances) {
+                Object.keys(Chart.instances).forEach(id => {
+                    const chart = Chart.instances[id];
+                    if (chart && chart.canvas && container.contains(chart.canvas)) {
+                        console.log(`🗑️ Force destroying chart instance ${id} in ${chartType} container`);
+                        chart.destroy();
+                        // Remove from registry
+                        delete Chart.instances[id];
+                    }
+                });
+            }
+        } catch (e) {
+            console.warn(`⚠️ Error in force cleanup for ${chartType}:`, e);
+        }
+    }
+    
+    // Actually create the forecast chart (separated for timing)
+    actuallyCreateForecastChart(ctx, results) {
         
         // Check if forecast data is available
         if (!results.forecast_data || results.forecast_data.error) {
@@ -2231,10 +2342,12 @@ class UIManager {
             return;
         }
         
-        // Create canvas for Chart.js with unique ID
+        // Create canvas for Chart.js with unique ID and ensure no conflicts
         const canvas = document.createElement('canvas');
-        canvas.id = 'forecastCanvas_' + Date.now();
+        canvas.id = 'forecastCanvas_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
         ctx.appendChild(canvas);
+        
+        console.log(`📊 Created forecast canvas with ID: ${canvas.id}`);
         
         try {
             // Prepare data for Chart.js
@@ -2361,6 +2474,7 @@ class UIManager {
             
             // Try to create the chart with time scale, fallback to linear if it fails
             try {
+                console.log('🎯 Creating Chart.js instance...');
                 this.forecastChartInstance = new Chart(canvas, {
                     type: 'line',
                     data: {
@@ -2429,6 +2543,7 @@ class UIManager {
                         }
                     }
                 });
+                console.log('✅ Chart.js instance created successfully');
             } catch (timeScaleError) {
                 console.warn('Time scale failed, using linear scale:', timeScaleError);
                 
@@ -2459,6 +2574,7 @@ class UIManager {
                     })
                 }));
                 
+                console.log('🎯 Creating fallback Chart.js instance...');
                 this.forecastChartInstance = new Chart(canvas, {
                     type: 'line',
                     data: {
@@ -2522,10 +2638,11 @@ class UIManager {
                         }
                     }
                 });
+                console.log('✅ Fallback Chart.js instance created successfully');
             }
             
         } catch (error) {
-            console.error('Error creating forecast chart:', error);
+            console.error('❌ Error creating forecast chart:', error);
             
             // Show error message
             ctx.innerHTML = `
@@ -2654,8 +2771,116 @@ class UIManager {
     // Start new session
     startNewSession() {
         if (confirm('Starting a new session will clear all current data. Continue?')) {
+            // Clean up all chart instances before reload
+            this.destroyAllCharts();
             location.reload();
         }
+    }
+    
+    // Destroy all chart instances
+    destroyAllCharts() {
+        console.log('🧹 Destroying all chart instances...');
+        
+        // Destroy tracked chart instances
+        if (this.forecastChartInstance) {
+            try {
+                this.forecastChartInstance.destroy();
+                console.log('✅ Destroyed forecast chart instance');
+            } catch (e) {
+                console.warn('⚠️ Error destroying forecast chart:', e);
+            }
+            this.forecastChartInstance = null;
+        }
+        if (this.clusterChartInstance) {
+            try {
+                this.clusterChartInstance.destroy();
+                console.log('✅ Destroyed cluster chart instance');
+            } catch (e) {
+                console.warn('⚠️ Error destroying cluster chart:', e);
+            }
+            this.clusterChartInstance = null;
+        }
+        if (this.featureImportanceChartInstance) {
+            try {
+                this.featureImportanceChartInstance.destroy();
+                console.log('✅ Destroyed feature importance chart instance');
+            } catch (e) {
+                console.warn('⚠️ Error destroying feature importance chart:', e);
+            }
+            this.featureImportanceChartInstance = null;
+        }
+        
+        // More aggressive cleanup: destroy all Chart.js instances
+        try {
+            // Try to access Chart.js registry (availability depends on version)
+            if (typeof Chart !== 'undefined') {
+                // Method 1: Try Chart.instances (Chart.js 3.x)
+                if (Chart.instances && typeof Chart.instances === 'object') {
+                    Object.keys(Chart.instances).forEach(id => {
+                        const chart = Chart.instances[id];
+                        if (chart) {
+                            console.log(`🗑️ Destroying chart instance ${id}`);
+                            chart.destroy();
+                        }
+                    });
+                    // Clear the instances registry
+                    Chart.instances = {};
+                    console.log('✅ Cleared Chart.js instances registry');
+                }
+                
+                // Method 2: Try Chart.registry (Chart.js 4.x)
+                if (Chart.registry && Chart.registry.getAll) {
+                    try {
+                        const allCharts = Chart.registry.getAll();
+                        allCharts.forEach(chart => {
+                            if (chart && typeof chart.destroy === 'function') {
+                                console.log(`🗑️ Destroying chart from registry`);
+                                chart.destroy();
+                            }
+                        });
+                        console.log('✅ Cleared Chart.js registry');
+                    } catch (registryError) {
+                        console.warn('⚠️ Error with Chart.js registry:', registryError);
+                    }
+                }
+                
+                // Method 3: Global cleanup using Chart.helpers if available
+                if (Chart.helpers && Chart.helpers.each) {
+                    try {
+                        Chart.helpers.each(Chart.instances || {}, (chart, id) => {
+                            if (chart && typeof chart.destroy === 'function') {
+                                console.log(`🗑️ Destroying chart via helpers ${id}`);
+                                chart.destroy();
+                            }
+                        });
+                    } catch (helpersError) {
+                        console.warn('⚠️ Error with Chart.js helpers:', helpersError);
+                    }
+                }
+            }
+        } catch (e) {
+            console.warn('⚠️ Error clearing Chart.js registry:', e);
+        }
+        
+        // Clean up any remaining canvases
+        const allCanvases = document.querySelectorAll('canvas');
+        allCanvases.forEach((canvas, index) => {
+            try {
+                const chartInstance = Chart.getChart(canvas);
+                if (chartInstance) {
+                    console.log(`🗑️ Destroying chart from canvas ${index}`);
+                    chartInstance.destroy();
+                }
+                // Remove canvas from DOM to prevent reuse
+                if (canvas.parentNode) {
+                    canvas.parentNode.removeChild(canvas);
+                }
+            } catch (e) {
+                console.warn(`⚠️ Error cleaning canvas ${index}:`, e);
+            }
+        });
+        
+        console.log('✅ Chart cleanup complete');
     }
 
     // Show loading overlay
