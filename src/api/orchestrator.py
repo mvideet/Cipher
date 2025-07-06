@@ -26,7 +26,6 @@ from ..models.schema import (
 )
 from ..ml.prompt_parser import PromptParser
 from ..ml.data_profiler import DataProfiler
-from ..ml.trainer import TrainingOrchestrator
 from ..ml.enhanced_trainer import EnhancedTrainingOrchestrator
 from ..ml.explainer import Explainer
 from ..ml.deployer import Deployer
@@ -89,23 +88,23 @@ async def start_ml_session(
     prompt: str = Form(...),
     db: Session = Depends(get_session)
 ):
-    """Start a new ML session with dataset upload and prompt"""
+    """Start a new ML session with enhanced training (LLM-guided ensemble model selection)"""
     
-    logger.info("Starting ML session", session_id=session_id, prompt=prompt)
+    logger.info("Starting ML session with enhanced training", session_id=session_id, prompt=prompt)
     
     try:
         # Save uploaded file to a temporary location first
         run_id = str(uuid.uuid4())
         temp_file_path = await save_uploaded_file(file, run_id)
         
-        # Immediately schedule the background processing task
+        # Always use enhanced training mode
         asyncio.create_task(
             _process_and_train_pipeline(
                 run_id=run_id,
                 session_id=session_id,
                 temp_file_path=temp_file_path,
                 prompt=prompt,
-                enhanced=False
+                enhanced=True
             )
         )
         
@@ -113,7 +112,7 @@ async def start_ml_session(
         return {
             "run_id": run_id,
             "status": "processing_started",
-            "message": "File uploaded. Processing and training will start shortly."
+            "message": "File uploaded. Processing and enhanced training will start shortly."
         }
         
     except Exception as e:
@@ -158,16 +157,8 @@ async def _process_and_train_pipeline(
             if df.empty:
                 raise ValueError("Dataset is empty")
             
-            # Create run record
-            # Choose between EnhancedRun or Run model based on whether enhanced mode is enabled
-            run_model = EnhancedRun if enhanced else Run
-            
-            # Create a new run record in the database with:
-            # - The generated run_id
-            # - The user's original prompt text
-            # - A hash of the dataset to identify duplicates
-            # - Initial status of "parsing_prompt"
-            run = run_model(
+            # Create run record - always use EnhancedRun since we only use enhanced training
+            run = EnhancedRun(
                 id=run_id,
                 user_prompt=prompt, 
                 dataset_hash=dataset_hash,
@@ -232,17 +223,11 @@ async def _process_and_train_pipeline(
             db.commit()
             # --- End of previously blocking code ---
 
-            # Now, call the appropriate training pipeline
-            if enhanced:
-                await _run_enhanced_training_pipeline(
-                    run.id, session_id, temp_file_path, 
-                    prompt_response, profile, db
-                )
-            else:
-                await _run_training_pipeline(
-                    run.id, session_id, temp_file_path,
-                    prompt_response, profile, db
-                )
+            # Always use enhanced training pipeline
+            await _run_enhanced_training_pipeline(
+                run.id, session_id, temp_file_path, 
+                prompt_response, profile, db
+            )
 
         except Exception as e:
             logger.error("Background processing/training failed", run_id=run_id, error=str(e), exc_info=True)
@@ -269,47 +254,7 @@ async def _process_and_train_pipeline(
                 pass
 
 
-@router.post("/session/{session_id}/start-enhanced")
-async def start_enhanced_ml_session(
-    session_id: str,
-    file: UploadFile = File(...),
-    prompt: str = Form(...),
-    db: Session = Depends(get_session)
-):
-    """Start an enhanced ML session with LLM-guided ensemble model selection"""
-    
-    logger.info("Starting enhanced ML session", session_id=session_id, prompt=prompt)
-    
-    try:
-        # Save uploaded file to a temporary location first
-        run_id = str(uuid.uuid4())
-        temp_file_path = await save_uploaded_file(file, run_id)
-        
-        # Immediately schedule the background processing task
-        asyncio.create_task(
-            _process_and_train_pipeline(
-                run_id=run_id,
-                session_id=session_id,
-                temp_file_path=temp_file_path,
-                prompt=prompt,
-                enhanced=True
-            )
-        )
-        
-        # Return a response to the client immediately
-        return {
-            "run_id": run_id,
-            "status": "processing_started",
-            "message": "File uploaded. Processing and enhanced training will start shortly."
-        }
-        
-    except Exception as e:
-        logger.error("Failed to start enhanced ML session", error=str(e), exc_info=True)
-        detailed_error = traceback.format_exc()
-        await websocket_manager.broadcast_error(
-            session_id, f"Failed to initiate enhanced session: {str(e)}\n{detailed_error}"
-        )
-        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
 
 
 @router.post("/session/{session_id}/clarify")
@@ -401,95 +346,6 @@ async def deploy_model(
         )
         raise HTTPException(status_code=500, detail="Deployment failed")
 
-
-async def _run_training_pipeline(
-    run_id: str,
-    session_id: str,
-    dataset_path: str,
-    prompt_response: PromptResponse,
-    profile: DataProfile,
-    db: Session
-):
-    """Run the complete training pipeline asynchronously"""
-    
-    # Import here to avoid circular imports
-    from ..database import get_session
-    
-    try:
-        logger.info("Starting training pipeline", run_id=run_id, session_id=session_id)
-        
-        # Initialize training orchestrator
-        trainer = TrainingOrchestrator(
-            run_id=run_id,
-            session_id=session_id,
-            websocket_manager=websocket_manager
-        )
-        
-        logger.info("Training orchestrator initialized", run_id=run_id)
-        
-        # Run training
-        best_model = await trainer.train_models(
-            dataset_path=dataset_path,
-            target_col=prompt_response.target,
-            task_type=prompt_response.task,
-            metric=prompt_response.metric,
-            constraints=prompt_response.constraints
-        )
-        
-        # Generate explanations
-        explainer = Explainer()
-        explanation_result = await explainer.explain_model(
-            model_path=best_model.model_path,
-            dataset_path=dataset_path,
-            target_col=prompt_response.target
-        )
-        
-        # Update run status with fresh database session
-        with Session(engine) as fresh_db:
-            run = fresh_db.get(Run, run_id)
-            if run:
-                run.status = "completed"
-                run.end_ts = datetime.utcnow()
-                run.best_family = best_model.family
-                run.val_score = best_model.val_score
-                fresh_db.add(run)
-                fresh_db.commit()
-        
-        # Notify frontend
-        await websocket_manager.broadcast_training_complete(
-            session_id,
-            {
-                "run_id": run_id,
-                "best_model": best_model.dict(),
-                "explanation": explanation_result
-            }
-        )
-        
-        # Cleanup temp files
-        try:
-            os.remove(dataset_path)
-        except:
-            pass
-            
-    except Exception as e:
-        logger.error("Training pipeline failed", run_id=run_id, error=str(e))
-        
-        # Update run status with fresh database session
-        try:
-            with Session(engine) as fresh_db:
-                run = fresh_db.get(Run, run_id)
-                if run:
-                    run.status = "failed"
-                    run.end_ts = datetime.utcnow()
-                    fresh_db.add(run)
-                    fresh_db.commit()
-        except Exception as db_error:
-            logger.error("Failed to update run status", error=str(db_error))
-        
-        # Notify frontend
-        await websocket_manager.broadcast_error(
-            session_id, f"Training failed: {str(e)}"
-        )
 
 
 async def _run_enhanced_training_pipeline(
@@ -741,37 +597,51 @@ async def get_model_recommendations(
                 "file_path": str(file_path)
             }
         else:
-            # For non-enhanced mode, start training directly
-            # Create run record
-            run = Run(
-                id=run_id,
-                user_prompt=prompt,
-                dataset_hash=hashlib.sha1(file_content).hexdigest(),
-                status="training",
-                metric=parsed_intent.metric
-            )
-            db.add(run)
-            db.commit()
-            db.refresh(run)
+            # Always use enhanced training - no longer support standard mode
+            from ..ml.model_selector import ModelSelector
+            model_selector = ModelSelector()
             
-            # Start simple training in background
-            logger.info("Starting simple training pipeline", run_id=run_id, session_id=session_id)
-            asyncio.create_task(
-                _run_training_pipeline(
-                    run_id, session_id, file_path,
-                    PromptResponse(
-                        task=parsed_intent.task,
-                        target=parsed_intent.target,
-                        metric=parsed_intent.metric,
-                        constraints=parsed_intent.constraints or {},
-                        clarifications_needed=None
-                    ),
-                    data_profile, db
-                )
+            ensemble_strategy = await model_selector.recommend_ensemble(
+                data_profile=data_profile,
+                task_type=parsed_intent.task,
+                target_column=parsed_intent.target,
+                constraints=parsed_intent.constraints
             )
+            
+            # Format recommendations for frontend
+            recommendations = []
+            model_type_counters = {}  # Track count per model type for unique IDs
+            
+            for model_rec in ensemble_strategy.recommended_models:
+                # Generate deterministic ID based on model type, not array position
+                model_type = model_rec.model_type
+                if model_type not in model_type_counters:
+                    model_type_counters[model_type] = 0
+                else:
+                    model_type_counters[model_type] += 1
+                
+                model_id = f"{model_type}_{model_type_counters[model_type]}"
+                
+                recommendations.append({
+                    "id": model_id,
+                    "model_type": model_rec.model_type,
+                    "model_family": model_rec.model_family,
+                    "name": model_rec.model_type.replace("_", " ").title(),
+                    "complexity_score": model_rec.complexity_score,
+                    "expected_training_time": model_rec.expected_training_time,
+                    "training_time_estimate": model_rec.training_time_estimate,
+                    "memory_usage": model_rec.memory_usage,
+                    "interpretability": model_rec.interpretability,
+                    "reasoning": model_rec.reasoning,
+                    "pros": model_rec.pros or [],
+                    "cons": model_rec.cons or [],
+                    "best_for": model_rec.best_for,
+                    "architectures": len(model_rec.architectures),
+                    "selected": True  # Default to selected
+                })
             
             return {
-                "status": "training_started",
+                "status": "recommendations_ready",
                 "run_id": run_id,
                 "session_id": session_id,
                 "parsed_intent": {
@@ -783,7 +653,15 @@ async def get_model_recommendations(
                     "n_rows": data_profile.n_rows,
                     "n_cols": data_profile.n_cols,
                     "issues": data_profile.issues
-                }
+                },
+                "recommendations": recommendations,
+                "ensemble_strategy": {
+                    "method": ensemble_strategy.ensemble_method,
+                    "reasoning": ensemble_strategy.reasoning,
+                    "diversity_score": ensemble_strategy.diversity_score
+                },
+                "estimated_total_time": "15-45 minutes",
+                "file_path": str(file_path)
             }
             
     except Exception as e:

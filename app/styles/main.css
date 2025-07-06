@@ -2880,4 +2880,297 @@ body {
     .score-label {
         min-width: auto;
     }
+}
+
+/* Enhanced Training Section Styles */
+.training-section {
+    background: linear-gradient(135deg, #f0f4f8 0%, #e8edf2 100%); /* Lighter, subtle gradient */
+    border-radius: 12px; /* Consistent border-radius */
+    padding: 0;
+    margin-bottom: 10px;
+    box-shadow: 0 5px 10px -2px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03); /* Lighter shadow */
+    position: relative;
+    overflow: hidden;
+}
+
+.training-section::before {
+    /* Removed to reduce visual complexity */
+    content: none;
+}
+
+.training-info {
+    position: relative;
+    z-index: 2;
+    background: rgba(255, 255, 255, 0.98); /* Slightly less transparent */
+    backdrop-filter: blur(8px); /* Slightly less blur */
+    margin: 0; /* Make it flush with parent */
+    border-radius: 12px; /* Match parent border-radius */
+    padding: 8px;
+    border: 1px solid rgba(226, 232, 240, 0.6); /* Lighter border */
+}
+
+.training-info h4 {
+    color: #1e293b;
+    font-size: 16px;
+    font-weight: 700;
+    margin-bottom: 8px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.training-info h4::before {
+    content: '🧠';
+    font-size: 16px; /* Smaller icon font size */
+    background: none; /* Remove gradient background */
+    color: #64748b; /* Solid color for icon */
+    -webkit-background-clip: unset; /* Remove webkit clip */
+    -webkit-text-fill-color: unset; /* Remove webkit text fill */
+    background-clip: unset; /* Remove background clip */
+}
+
+.training-description {
+    display: flex;
+    flex-direction: column;
+    gap: 10px; /* Further reduced gap */
+}
+
+.training-features {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px; /* Further reduced gap */
+    padding: 8px; /* Further reduced padding */
+    background: linear-gradient(135deg, rgba(59, 130, 246, 0.05), rgba(139, 92, 246, 0.05));
+    border-radius: 12px;
+    border: 1px solid rgba(59, 130, 246, 0.1);
+    position: relative;
+    overflow: hidden;
+}
+
+.training-features::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 4px;
+    height: 100%;
+    background: linear-gradient(135deg, #667eea, #764ba2);
+}
+
+.training-features i {
+    font-size: 32px;
+    background: linear-gradient(135deg, #667eea, #764ba2);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    flex-shrink: 0;
+    margin-top: 4px;
+}
+
+.feature-content {
+    flex: 1;
+}
+
+.feature-content h5 {
+    color: #1e293b;
+    font-size: 14px; /* Reduced font size */
+    font-weight: 600;
+    margin-bottom: 4px; /* Reduced margin-bottom */
+    line-height: 1.3;
+}
+
+.feature-content p {
+    color: #475569;
+    font-size: 11px; /* Slightly reduced font size */
+    line-height: 1.4; /* Slightly reduced line height */
+    margin: 0;
+}
+
+.training-benefits {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px; /* Reduced gap */
+    padding: 10px 10px; /* Reduced padding */
+    background: rgba(248, 250, 252, 0.8);
+    border-radius: 12px;
+    border: 1px solid rgba(226, 232, 240, 0.6);
+}
+
+.training-benefits .feature-tag {
+    background: transparent;
+    color: #475569; /* Darker, muted text color */
+    padding: 6px 12px; /* Reduced padding for compactness */
+    border-radius: 16px; /* Slightly more rounded */
+    font-size: 13px;
+    font-weight: 500; /* Slightly lighter font weight */
+    border: 1px solid #cbd5e1; /* Subtle border */
+    box-shadow: none; /* Removed shadow */
+    transition: all 0.2s ease;
+    position: relative;
+    overflow: hidden;
+}
+
+.training-benefits .feature-tag::before {
+    /* Removed for minimalistic look */
+    content: none;
+}
+
+.training-benefits .feature-tag:hover::before {
+    /* No longer needed as ::before is removed */
+}
+
+.training-benefits .feature-tag:hover {
+    transform: none; /* No translateY on hover */
+    box-shadow: none; /* No shadow on hover */
+    background: rgba(226, 232, 240, 0.4); /* Subtle background fill on hover */
+}
+
+.prompt-actions {
+    position: relative;
+    z-index: 2;
+    padding: 24px 32px;
+    background: rgba(255, 255, 255, 0.95);
+    backdrop-filter: blur(10px);
+    margin: 0 3px 3px 3px;
+    border-radius: 0 0 13px 13px;
+    border-top: 1px solid rgba(226, 232, 240, 0.3);
+    display: flex;
+    justify-content: center;
+}
+
+.training-section .prompt-actions .btn-large {
+    padding: 6px 16px; /* Adjusted padding for better fit with new style */
+    font-size: 14px;    /* Adjusted font size */
+    background: transparent;
+    color: #764ba2; /* Match text color to border for seamless look */
+    border: 2px solid #764ba2; /* Subtle border matching the section's gradient */
+    border-radius: 50px;  /* Pill shape */
+    position: relative;
+    overflow: hidden;
+    transition: all 0.3s ease;
+    box-shadow: none;  /* Remove shadow for minimalistic look */
+    z-index: 1;
+    max-width: 200px;  /* Set a reasonable max-width */
+    margin: 0 auto;    /* Center the button */
+}
+
+.training-section .prompt-actions .btn-large::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: -100%;
+    width: 100%;
+    height: 100%;
+    background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.2), transparent);
+    transition: left 0.6s ease;
+}
+
+.training-section .prompt-actions .btn-large:hover::before {
+    left: 100%;
+}
+
+.training-section .prompt-actions .btn-large:hover:not(:disabled) {
+    transform: translateY(-2px); /* Slightly less pronounced hover effect */
+    box-shadow: 0 8px 15px -3px rgba(0, 0, 0, 0.1); /* Lighter shadow on hover */
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%) !important; /* Original gradient on hover */
+    color: white; /* White text on hover */
+}
+
+.training-section .prompt-actions .btn-large:disabled {
+    background: #e2e8f0 !important; /* Lighter disabled background */
+    color: #94a3b8 !important; /* Lighter disabled text */
+    border-color: #cbd5e1 !important; /* Lighter disabled border */
+    cursor: not-allowed;
+    transform: none;
+    box-shadow: none;
+}
+
+.training-section .prompt-actions .btn-large i {
+    margin-right: 8px; /* Reduced margin for icon */
+    font-size: 16px; /* Adjusted icon font size */
+    color: #764ba2; /* Match icon color to text/border */
+}
+
+.training-section .prompt-actions .btn-large:hover:not(:disabled) i {
+    color: white; /* White icon on hover */
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+    .training-info {
+        padding: 15px 10px; /* Further reduced padding */
+    }
+    
+    .training-features {
+        padding: 10px; /* Further reduced padding */
+        gap: 10px; /* Further reduced gap */
+    }
+    
+    .training-features i {
+        font-size: 20px; /* Adjusted icon font size for smaller screens */
+    }
+    
+    .feature-content h5 {
+        font-size: 14px;
+    }
+    
+    .feature-content p {
+        font-size: 12px;
+    }
+    
+    .training-benefits {
+        padding: 10px 10px; /* Further reduced padding */
+        gap: 6px; /* Further reduced gap */
+    }
+    
+    .training-benefits .feature-tag {
+        font-size: 11px;
+        padding: 4px 8px;
+    }
+    
+    .prompt-actions {
+        padding: 10px;
+    }
+    
+    .training-section .prompt-actions .btn-large {
+        min-width: 150px; /* Adjust min-width for mobile */
+        font-size: 12px;
+        padding: 5px 12px !important; /* Adjusted padding for mobile */
+        border-width: 1px; /* Thinner border for mobile */
+    }
+
+    .training-section .prompt-actions .btn-large i {
+        font-size: 14px; /* Adjusted icon size for mobile */
+        margin-right: 6px;
+    }
+}
+
+@media (max-width: 480px) {
+    .training-info h4 {
+        font-size: 14px; /* Further reduced font size */
+        margin-bottom: 8px;
+    }
+    
+    .training-features {
+        flex-direction: column;
+        align-items: center;
+        text-align: center;
+        padding: 8px;
+    }
+    
+    .training-benefits {
+        justify-content: center;
+        padding: 6px 6px;
+        gap: 3px;
+    }
+    
+    .training-section .prompt-actions .btn-large {
+        padding: 4px 10px;
+        font-size: 10px;
+        max-width: 100px;  /* Limit maximum width for smaller button on mobile */
+    }
+    .training-section .prompt-actions .btn-large i {
+        font-size: 12px;
+        margin-right: 4px;
+    }
 } 

@@ -126,52 +126,29 @@
                     </div>
 
                     <div class="training-section">
-                        <div class="training-mode-selection">
-                            <h4>Training Mode</h4>
-                            <div class="mode-options">
-                                <label class="mode-option">
-                                    <input type="radio" name="trainingMode" value="standard" checked>
-                                    <div class="mode-card">
-                                        <div class="mode-header">
-                                            <i class="fas fa-bolt"></i>
-                                            <span class="mode-title">Standard Training</span>
-                                        </div>
-                                        <div class="mode-description">
-                                            Fast training with 3 proven model families (baseline, LightGBM, MLP)
-                                        </div>
-                                        <div class="mode-features">
-                                            <span class="feature-tag">Quick Results</span>
-                                            <span class="feature-tag">3 Models</span>
-                                        </div>
+                        <div class="training-info">
+                            <h4>Enhanced Training</h4>
+                            <div class="training-description">
+                                <div class="training-features">
+                                    <i class="fas fa-brain"></i>
+                                    <div class="feature-content">
+                                        <h5>LLM-Guided Model Selection</h5>
+                                        <p>AI analyzes your data and recommends the best models with ensemble creation and neural architecture search</p>
                                     </div>
-                                </label>
-                                
-                                <label class="mode-option">
-                                    <input type="radio" name="trainingMode" value="enhanced">
-                                    <div class="mode-card enhanced">
-                                        <div class="mode-header">
-                                            <i class="fas fa-brain"></i>
-                                            <span class="mode-title">Enhanced Training</span>
-                                            <span class="mode-badge">LLM-Guided</span>
-                                        </div>
-                                        <div class="mode-description">
-                                            LLM-powered model selection with ensemble creation and neural architecture search
-                                        </div>
-                                        <div class="mode-features">
-                                            <span class="feature-tag">LLM Selection</span>
-                                            <span class="feature-tag">Multiple Architectures</span>
-                                            <span class="feature-tag">Neural Search</span>
-                                            <span class="feature-tag">Smart Ensembles</span>
-                                        </div>
-                                    </div>
-                                </label>
+                                </div>
+                                <div class="training-benefits">
+                                    <span class="feature-tag">LLM Selection</span>
+                                    <span class="feature-tag">Multiple Architectures</span>
+                                    <span class="feature-tag">Neural Search</span>
+                                    <span class="feature-tag">Smart Ensembles</span>
+                                </div>
                             </div>
                         </div>
                         
                         <div class="prompt-actions">
                             <button class="btn btn-primary btn-large" id="startTrainingBtn" disabled>
                                 <i class="fas fa-play"></i>
-                                <span id="startBtnText">Start ML Pipeline</span>
+                                <span id="startBtnText">Start Enhanced ML Pipeline</span>
                             </button>
                         </div>
                     </div>

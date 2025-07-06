@@ -30,7 +30,9 @@ seaborn = "^0.12.0"
 plotly = "^5.17.0"
 catboost = "^1.2.0"
 lightgbm = "^4.6.0"
-statsmodels = "^0.14.4"
+statsmodels = "0.14.4"
+scipy = "1.15.3"
+prophet = "^1.1.7"
 
 [tool.poetry.extras]
 dev = ["pytest", "black", "ruff", "pre-commit", "pytest-asyncio"]

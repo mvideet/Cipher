@@ -18,6 +18,13 @@ class UIManager {
         
         // NEW: Track individual architectures for each family
         this.familyArchitectures = {}; // Structure: { family: { archName: { metrics, status, etc. } } }
+        
+        // Chart creation locks to prevent race conditions
+        this.chartCreationLocks = {
+            forecast: false,
+            cluster: false,
+            featureImportance: false
+        };
     }
 
     // Initialize UI
@@ -353,12 +360,7 @@ class UIManager {
             this.updateStartButtonState();
         });
 
-        // Training mode change
-        document.querySelectorAll('input[name="trainingMode"]').forEach(radio => {
-            radio.addEventListener('change', () => {
-                this.updateTrainingModeUI();
-            });
-        });
+        // Training mode selection removed - always use enhanced training
     }
 
     // Setup copy buttons
@@ -392,34 +394,21 @@ class UIManager {
         startBtn.disabled = !(fileSelected && promptFilled);
     }
 
-    // Update training mode UI
-    updateTrainingModeUI() {
-        const selectedMode = document.querySelector('input[name="trainingMode"]:checked').value;
-        const startBtnText = document.getElementById('startBtnText');
-        
-        if (selectedMode === 'enhanced') {
-            startBtnText.textContent = 'Start Enhanced ML Pipeline';
-        } else {
-            startBtnText.textContent = 'Start ML Pipeline';
-        }
-    }
+    // Always use enhanced training - UI mode selection removed
 
     // Start training
     async startTraining() {
         const fileInput = document.getElementById('fileInput');
         const promptInput = document.getElementById('promptInput');
-        const selectedMode = document.querySelector('input[name="trainingMode"]:checked').value;
         
         const file = fileInput.files[0];
         const prompt = promptInput.value.trim();
-        const enhanced = selectedMode === 'enhanced';
+        const enhanced = true; // Always use enhanced training
         
         // Debug logging for Enhanced Mode
         console.log('🔍 Training Mode Debug:', {
-            selectedMode,
             enhanced,
-            radioBtnValue: document.querySelector('input[name="trainingMode"]:checked')?.value,
-            allRadioBtns: Array.from(document.querySelectorAll('input[name="trainingMode"]')).map(r => ({value: r.value, checked: r.checked}))
+            mode: 'enhanced (always)'
         });
 
         if (!file || !prompt) {
@@ -428,10 +417,8 @@ class UIManager {
         }
 
         try {
-            const loadingTitle = enhanced ? 'Getting AI Recommendations' : 'Starting ML Pipeline';
-            const loadingSubtitle = enhanced ? 
-                'AI is analyzing your data and recommending models...' : 
-                'Uploading data and parsing prompt...';
+            const loadingTitle = 'Getting AI Recommendations';
+            const loadingSubtitle = 'AI is analyzing your data and recommending models...';
             
             this.showLoading(loadingTitle, loadingSubtitle);
             
@@ -456,8 +443,8 @@ class UIManager {
                     result.parsed_intent
                 );
             } else if (result.status === 'training_started') {
-                // Direct to training for non-enhanced mode
-                console.log('🚀 Starting training directly (Simple Mode)');
+                // Direct to training 
+                console.log('🚀 Starting training directly');
                 this.currentRunId = result.run_id;
                 this.handleTrainingStarted(result, enhanced);
             } else {
@@ -1857,15 +1844,18 @@ class UIManager {
         console.log('📊 Creating cluster chart...');
         
         // Aggressive cleanup before creating new chart
-        this.cleanupChartsInContainer(ctx, 'cluster');
-        
-        // Clear existing content completely
-        ctx.innerHTML = '';
-        
-        // Small delay to ensure cleanup is complete
-        setTimeout(() => {
-            this.actuallyCreateClusterChart(ctx, results);
-        }, 100);
+        this.cleanupChartsInContainer(ctx, 'cluster').then(() => {
+            // Ensure container is ready
+            if (ctx.children.length > 0) {
+                console.log('🔄 Container still has children, clearing again...');
+                ctx.innerHTML = '';
+            }
+            
+            // Additional delay to ensure Chart.js is ready
+            setTimeout(() => {
+                this.actuallyCreateClusterChart(ctx, results);
+            }, 50);
+        });
     }
     
     // Actually create the cluster chart (separated for timing)
@@ -2178,15 +2168,18 @@ class UIManager {
         console.log('📊 Creating feature importance chart...');
         
         // Aggressive cleanup before creating new chart
-        this.cleanupChartsInContainer(ctx, 'featureImportance');
-        
-        // Clear existing content completely
-        ctx.innerHTML = '';
-        
-        // Small delay to ensure cleanup is complete
-        setTimeout(() => {
-            this.actuallyCreateFeatureImportanceChart(ctx, featureImportance);
-        }, 100);
+        this.cleanupChartsInContainer(ctx, 'featureImportance').then(() => {
+            // Ensure container is ready
+            if (ctx.children.length > 0) {
+                console.log('🔄 Container still has children, clearing again...');
+                ctx.innerHTML = '';
+            }
+            
+            // Additional delay to ensure Chart.js is ready
+            setTimeout(() => {
+                this.actuallyCreateFeatureImportanceChart(ctx, featureImportance);
+            }, 50);
+        });
     }
     
     // Actually create the feature importance chart (separated for timing)
@@ -2255,71 +2248,97 @@ class UIManager {
         }
     }
 
-    // Create forecast chart
+    // Create forecast chart with improved error handling
     createForecastChart(results) {
         const ctx = document.getElementById('forecastChart');
         if (!ctx) return;
         
+        // Prevent race conditions with chart creation lock
+        if (this.chartCreationLocks.forecast) {
+            console.log('🚧 Forecast chart creation already in progress, skipping...');
+            return;
+        }
+        
+        this.chartCreationLocks.forecast = true;
         console.log('📊 Creating forecast chart...');
         
-        // Aggressive cleanup before creating new chart
-        this.cleanupChartsInContainer(ctx, 'forecast');
-        
-        // Clear existing content completely
-        ctx.innerHTML = '';
-        
-        // Small delay to ensure cleanup is complete
-        setTimeout(() => {
-            this.actuallyCreateForecastChart(ctx, results);
-        }, 100);
+        // Aggressive cleanup with promise-based timing
+        this.cleanupChartsInContainer(ctx, 'forecast').then(() => {
+            // Ensure container is ready
+            if (ctx.children.length > 0) {
+                console.log('🔄 Container still has children, clearing again...');
+                ctx.innerHTML = '';
+            }
+            
+            // Additional delay to ensure Chart.js is ready
+            setTimeout(() => {
+                this.actuallyCreateForecastChart(ctx, results);
+                // Release the lock after chart creation
+                this.chartCreationLocks.forecast = false;
+            }, 50);
+        }).catch((error) => {
+            console.error('❌ Error in forecast chart cleanup:', error);
+            this.chartCreationLocks.forecast = false;
+        });
     }
     
     // Helper method to clean up charts in a specific container
     cleanupChartsInContainer(container, chartType) {
         console.log(`🧹 Cleaning up ${chartType} charts in container...`);
         
-        // Destroy tracked instance
-        const instanceProp = `${chartType}ChartInstance`;
-        if (this[instanceProp]) {
-            try {
-                this[instanceProp].destroy();
-                console.log(`✅ Destroyed tracked ${chartType} chart`);
-            } catch (e) {
-                console.warn(`⚠️ Error destroying ${chartType} chart:`, e);
+        return new Promise((resolve) => {
+            // Step 1: Destroy tracked instance
+            const instanceProp = `${chartType}ChartInstance`;
+            if (this[instanceProp]) {
+                try {
+                    this[instanceProp].destroy();
+                    console.log(`✅ Destroyed tracked ${chartType} chart`);
+                } catch (e) {
+                    console.warn(`⚠️ Error destroying ${chartType} chart:`, e);
+                }
+                this[instanceProp] = null;
             }
-            this[instanceProp] = null;
-        }
-        
-        // Destroy any existing Chart.js instances in the container
-        const existingCanvases = container.querySelectorAll('canvas');
-        existingCanvases.forEach((canvas, index) => {
+            
+            // Step 2: Destroy any existing Chart.js instances in the container
+            const existingCanvases = container.querySelectorAll('canvas');
+            existingCanvases.forEach((canvas, index) => {
+                try {
+                    const chartInstance = Chart.getChart(canvas);
+                    if (chartInstance) {
+                        console.log(`🗑️ Destroying chart instance in ${chartType} container canvas ${index}`);
+                        chartInstance.destroy();
+                    }
+                } catch (e) {
+                    console.warn(`⚠️ Error destroying chart in canvas ${index}:`, e);
+                }
+            });
+            
+            // Step 3: Force cleanup of any Chart.js instances that might be lingering
             try {
-                const chartInstance = Chart.getChart(canvas);
-                if (chartInstance) {
-                    console.log(`🗑️ Destroying chart instance in ${chartType} container canvas ${index}`);
-                    chartInstance.destroy();
+                if (typeof Chart !== 'undefined' && Chart.instances) {
+                    Object.keys(Chart.instances).forEach(id => {
+                        const chart = Chart.instances[id];
+                        if (chart && chart.canvas && container.contains(chart.canvas)) {
+                            console.log(`🗑️ Force destroying chart instance ${id} in ${chartType} container`);
+                            chart.destroy();
+                            // Remove from registry
+                            delete Chart.instances[id];
+                        }
+                    });
                 }
             } catch (e) {
-                console.warn(`⚠️ Error destroying chart in canvas ${index}:`, e);
+                console.warn(`⚠️ Error in force cleanup for ${chartType}:`, e);
             }
+            
+            // Step 4: Clear container and force garbage collection
+            container.innerHTML = '';
+            
+            // Step 5: Wait for cleanup to complete
+            setTimeout(() => {
+                console.log(`✅ ${chartType} chart cleanup completed`);
+                resolve();
+            }, 150); // Increased delay for better cleanup
         });
-        
-        // Force cleanup of any Chart.js instances that might be lingering
-        try {
-            if (typeof Chart !== 'undefined' && Chart.instances) {
-                Object.keys(Chart.instances).forEach(id => {
-                    const chart = Chart.instances[id];
-                    if (chart && chart.canvas && container.contains(chart.canvas)) {
-                        console.log(`🗑️ Force destroying chart instance ${id} in ${chartType} container`);
-                        chart.destroy();
-                        // Remove from registry
-                        delete Chart.instances[id];
-                    }
-                });
-            }
-        } catch (e) {
-            console.warn(`⚠️ Error in force cleanup for ${chartType}:`, e);
-        }
     }
     
     // Actually create the forecast chart (separated for timing)
@@ -2345,6 +2364,18 @@ class UIManager {
         // Create canvas for Chart.js with unique ID and ensure no conflicts
         const canvas = document.createElement('canvas');
         canvas.id = 'forecastCanvas_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+        
+        // Double-check that no chart is already using this canvas
+        try {
+            const existingChart = Chart.getChart(canvas);
+            if (existingChart) {
+                console.log('🗑️ Found existing chart on new canvas, destroying...');
+                existingChart.destroy();
+            }
+        } catch (e) {
+            // Canvas is clean, continue
+        }
+        
         ctx.appendChild(canvas);
         
         console.log(`📊 Created forecast canvas with ID: ${canvas.id}`);
@@ -2475,6 +2506,14 @@ class UIManager {
             // Try to create the chart with time scale, fallback to linear if it fails
             try {
                 console.log('🎯 Creating Chart.js instance...');
+                
+                // Final safety check: ensure canvas is not in use
+                const existingChartOnCanvas = Chart.getChart(canvas);
+                if (existingChartOnCanvas) {
+                    console.log('🚨 Canvas already in use, destroying existing chart...');
+                    existingChartOnCanvas.destroy();
+                }
+                
                 this.forecastChartInstance = new Chart(canvas, {
                     type: 'line',
                     data: {
@@ -2575,6 +2614,14 @@ class UIManager {
                 }));
                 
                 console.log('🎯 Creating fallback Chart.js instance...');
+                
+                // Final safety check for fallback chart too
+                const existingFallbackChart = Chart.getChart(canvas);
+                if (existingFallbackChart) {
+                    console.log('🚨 Canvas already in use for fallback, destroying existing chart...');
+                    existingFallbackChart.destroy();
+                }
+                
                 this.forecastChartInstance = new Chart(canvas, {
                     type: 'line',
                     data: {
@@ -2781,6 +2828,11 @@ class UIManager {
     destroyAllCharts() {
         console.log('🧹 Destroying all chart instances...');
         
+        // Reset all chart creation locks
+        Object.keys(this.chartCreationLocks).forEach(key => {
+            this.chartCreationLocks[key] = false;
+        });
+        
         // Destroy tracked chart instances
         if (this.forecastChartInstance) {
             try {
@@ -2808,6 +2860,26 @@ class UIManager {
                 console.warn('⚠️ Error destroying feature importance chart:', e);
             }
             this.featureImportanceChartInstance = null;
+        }
+        
+        // Global cleanup of all Chart.js instances
+        try {
+            if (typeof Chart !== 'undefined' && Chart.instances) {
+                Object.keys(Chart.instances).forEach(id => {
+                    try {
+                        const chart = Chart.instances[id];
+                        if (chart) {
+                            console.log(`🗑️ Force destroying global chart instance ${id}`);
+                            chart.destroy();
+                            delete Chart.instances[id];
+                        }
+                    } catch (e) {
+                        console.warn(`⚠️ Error destroying global chart ${id}:`, e);
+                    }
+                });
+            }
+        } catch (e) {
+            console.warn('⚠️ Error in global chart cleanup:', e);
         }
         
         // More aggressive cleanup: destroy all Chart.js instances

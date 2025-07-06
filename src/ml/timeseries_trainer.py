@@ -466,60 +466,130 @@ class ARIMAForecaster:
             raise ValueError("Model must be fitted first")
         
         try:
-            # Use get_forecast for better control and error handling
             forecast_result = self.fitted_model.get_forecast(steps=steps)
+            forecast_values = forecast_result.predicted_mean.values
             
-            # Extract forecast values
-            forecast = forecast_result.predicted_mean.values if hasattr(forecast_result, 'predicted_mean') else forecast_result.forecast
-            
-            # Extract confidence intervals if available
-            conf_int = None
-            if hasattr(forecast_result, 'conf_int'):
-                try:
-                    conf_int = forecast_result.conf_int().values
-                except:
-                    # If conf_int() fails, try summary_frame
-                    try:
-                        summary = forecast_result.summary_frame()
-                        if 'mean_ci_lower' in summary.columns and 'mean_ci_upper' in summary.columns:
-                            conf_int = summary[['mean_ci_lower', 'mean_ci_upper']].values
-                    except:
-                        conf_int = None
-            
-            # Ensure forecast is a numpy array
-            if not isinstance(forecast, np.ndarray):
-                forecast = np.array([forecast] if np.isscalar(forecast) else forecast)
+            # Get confidence intervals
+            conf_int = forecast_result.conf_int()
+            confidence_intervals = [(conf_int.iloc[i, 0], conf_int.iloc[i, 1]) for i in range(len(conf_int))]
             
             return {
-                "forecast": forecast,
-                "confidence_intervals": conf_int
+                "forecast": forecast_values,
+                "confidence_intervals": confidence_intervals
+            }
+        except Exception as e:
+            logger.warning("ARIMA forecast failed", error=str(e))
+            # Fallback: use last value from training data
+            if hasattr(self, 'train_data') and len(self.train_data) > 0:
+                last_value = self.train_data.iloc[-1]
+                fallback_forecast = np.full(steps, last_value)
+                return {
+                    "forecast": fallback_forecast,
+                    "confidence_intervals": [(last_value * 0.9, last_value * 1.1) for _ in range(steps)]
+                }
+            else:
+                raise e
+
+
+class ExponentialSmoothingForecaster:
+    """Exponential Smoothing forecaster with trend and seasonal components"""
+    
+    def __init__(self):
+        self.model = None
+        self.fitted_model = None
+        self.train_data = None
+        
+    def fit(self, series: pd.Series, trend: str = None, seasonal: str = None, seasonal_periods: int = None) -> Dict[str, Any]:
+        """Fit Exponential Smoothing model with trend and seasonal options"""
+        
+        # Store training data for fallback forecasting
+        self.train_data = series.copy()
+        
+        try:
+            # Auto-detect seasonal periods if not provided
+            if seasonal_periods is None:
+                seasonal_periods = min(12, len(series) // 4) if len(series) > 24 else None
+            
+            # Try different configurations in order of complexity
+            configs_to_try = [
+                {"trend": trend, "seasonal": seasonal, "seasonal_periods": seasonal_periods},
+                {"trend": "add", "seasonal": "add", "seasonal_periods": seasonal_periods},
+                {"trend": "add", "seasonal": None, "seasonal_periods": None},
+                {"trend": None, "seasonal": None, "seasonal_periods": None},
+            ]
+            
+            best_aic = float('inf')
+            best_config = None
+            best_model = None
+            
+            for config in configs_to_try:
+                try:
+                    if config["seasonal_periods"] and len(series) < 2 * config["seasonal_periods"]:
+                        # Not enough data for seasonal component
+                        config["seasonal"] = None
+                        config["seasonal_periods"] = None
+                    
+                    model = ExponentialSmoothing(
+                        series,
+                        trend=config["trend"],
+                        seasonal=config["seasonal"],
+                        seasonal_periods=config["seasonal_periods"]
+                    )
+                    fitted = model.fit()
+                    
+                    if fitted.aic < best_aic:
+                        best_aic = fitted.aic
+                        best_config = config
+                        best_model = fitted
+                        
+                except Exception as e:
+                    logger.debug(f"Exponential Smoothing config {config} failed: {str(e)}")
+                    continue
+            
+            if best_model is None:
+                raise ValueError("All Exponential Smoothing configurations failed")
+            
+            self.fitted_model = best_model
+            
+            return {
+                "trend": best_config["trend"],
+                "seasonal": best_config["seasonal"],
+                "seasonal_periods": best_config["seasonal_periods"],
+                "aic": float(best_aic),
+                "model_type": "exponential_smoothing"
             }
             
         except Exception as e:
-            logger.warning("ARIMA forecast failed", error=str(e))
-            # Fallback to simple moving average of recent values
-            try:
-                if hasattr(self, 'train_data') and len(self.train_data) > 0:
-                    # Use last 5 values for moving average
-                    recent_values = self.train_data[-5:].values if len(self.train_data) >= 5 else self.train_data.values
-                    last_value = float(np.mean(recent_values))
-                elif hasattr(self.fitted_model, 'fittedvalues') and len(self.fitted_model.fittedvalues) > 0:
-                    # Try to get the last fitted value safely
-                    fitted_values = self.fitted_model.fittedvalues
-                    if isinstance(fitted_values, pd.Series):
-                        last_value = float(fitted_values.iloc[-1])
-                    else:
-                        last_value = float(fitted_values[-1])
-                else:
-                    last_value = 0.0
-            except Exception as fallback_error:
-                logger.warning("Fallback forecast calculation failed", error=str(fallback_error))
-                last_value = 0.0
+            logger.error("Exponential Smoothing fitting failed", error=str(e))
+            raise e
+    
+    def forecast(self, steps: int) -> Dict[str, np.ndarray]:
+        """Generate forecasts"""
+        if self.fitted_model is None:
+            raise ValueError("Model must be fitted first")
+        
+        try:
+            forecast_values = self.fitted_model.forecast(steps=steps)
+            
+            # Simple confidence intervals (±10% of forecast value)
+            confidence_intervals = [(val * 0.9, val * 1.1) for val in forecast_values]
             
             return {
-                "forecast": np.full(steps, last_value),
-                "confidence_intervals": None
+                "forecast": forecast_values,
+                "confidence_intervals": confidence_intervals
             }
+        except Exception as e:
+            logger.warning("Exponential Smoothing forecast failed", error=str(e))
+            # Fallback: use last value from training data
+            if self.train_data is not None and len(self.train_data) > 0:
+                last_value = self.train_data.iloc[-1]
+                fallback_forecast = np.full(steps, last_value)
+                return {
+                    "forecast": fallback_forecast,
+                    "confidence_intervals": [(last_value * 0.9, last_value * 1.1) for _ in range(steps)]
+                }
+            else:
+                raise e
 
 
 class ProphetForecaster:
@@ -527,6 +597,38 @@ class ProphetForecaster:
     
     def __init__(self):
         self.model = None
+        self.fitted_data = None
+        
+    def fit(self, series: pd.Series) -> Dict[str, Any]:
+        """Fit Prophet model with simple interface (for consistency)"""
+        if not PROPHET_AVAILABLE:
+            raise ImportError("Prophet not available. Install with: pip install prophet")
+        
+        # Create a simple dataframe for Prophet
+        df = pd.DataFrame({
+            'ds': pd.date_range(start='2020-01-01', periods=len(series), freq='D'),
+            'y': series.values
+        })
+        
+        try:
+            self.model = Prophet(
+                yearly_seasonality=True,
+                weekly_seasonality=True,
+                daily_seasonality=False
+            )
+            self.model.fit(df)
+            self.fitted_data = df
+            
+            return {
+                "yearly_seasonality": True,
+                "weekly_seasonality": True,
+                "daily_seasonality": False,
+                "model_type": "prophet"
+            }
+            
+        except Exception as e:
+            logger.error("Prophet fitting failed", error=str(e))
+            raise e
         
     def fit_with_seasonality(self, df: pd.DataFrame, date_col: str, target_col: str, 
                            yearly: bool = True, weekly: bool = True, daily: bool = False) -> Dict[str, Any]:
@@ -546,6 +648,7 @@ class ProphetForecaster:
                 daily_seasonality=daily
             )
             self.model.fit(prophet_df)
+            self.fitted_data = prophet_df
             
             return {
                 "yearly_seasonality": yearly,
@@ -557,6 +660,29 @@ class ProphetForecaster:
         except Exception as e:
             logger.error("Prophet fitting failed", error=str(e))
             raise e
+
+    def forecast(self, steps: int) -> Dict[str, np.ndarray]:
+        """Generate forecasts (consistent interface with other forecasters)"""
+        if self.model is None:
+            raise ValueError("Model must be fitted first")
+        
+        # Determine frequency from fitted data
+        if self.fitted_data is not None and len(self.fitted_data) > 1:
+            freq = pd.infer_freq(self.fitted_data['ds'])
+            if freq is None:
+                freq = 'D'  # Default to daily
+        else:
+            freq = 'D'
+        
+        future = self.model.make_future_dataframe(periods=steps, freq=freq)
+        forecast = self.model.predict(future)
+        
+        # Get only the forecasted values (last 'steps' values)
+        forecast_values = forecast['yhat'].tail(steps).values
+        
+        return {
+            "forecast": forecast_values
+        }
     
     def forecast_with_uncertainty(self, periods: int, freq: str = 'D') -> pd.DataFrame:
         """Generate forecasts with uncertainty intervals"""
@@ -577,6 +703,7 @@ class TimeSeriesTrainer:
         self.session_id = session_id
         self.websocket_manager = websocket_manager
         self.model_selector = ModelSelector()
+        self.start_time = time.time()  # Track training start time
         
     async def train_forecast_models(
         self,
@@ -647,28 +774,76 @@ class TimeSeriesTrainer:
             "user_selected": bool(len(selected_models) > 0)
         })
         
-        # Train models
+        # Train models in parallel with progress tracking
         trained_models = []
-        for i, model_rec in enumerate(model_recommendations):
-            try:
-                await self._send_training_status_update("training_model", {
-                    "model_type": model_rec.model_type,
-                    "progress": f"{i+1}/{len(model_recommendations)}"
-                })
-                
-                model_artifact = await self._train_ts_model(
+        training_tasks = []
+        
+        # Send initial training start update
+        await self._send_training_status_update("parallel_training_started", {
+            "total_models": len(model_recommendations),
+            "model_types": [rec.model_type for rec in model_recommendations],
+            "status": "starting_parallel_training"
+        })
+        
+        # Create training tasks for parallel execution
+        for model_rec in model_recommendations:
+            task = asyncio.create_task(
+                self._train_ts_model_with_progress(
                     model_rec, train_df, test_df, data_pipeline, 
                     forecast_horizon, ts_characteristics
                 )
-                
-                if model_artifact:
-                    trained_models.append(model_artifact)
+            )
+            training_tasks.append((model_rec.model_type, task))
+            logger.info(f"Created training task for {model_rec.model_type}")
+        
+        # Wait for all models to complete using asyncio.gather for true parallelism
+        logger.info(f"Starting parallel training of {len(training_tasks)} models")
+        results = await asyncio.gather(*[task for _, task in training_tasks], return_exceptions=True)
+        
+        # Process results
+        for i, ((model_type, task), result) in enumerate(zip(training_tasks, results)):
+            try:
+                if isinstance(result, Exception):
+                    logger.error(f"Model {model_type} failed with exception", error=str(result))
+                    await self._send_training_status_update("model_failed", {
+                        "model_type": model_type,
+                        "status": "failed",
+                        "error": str(result)
+                    })
+                elif result is not None:
+                    trained_models.append(result)
+                    logger.info(f"Model {model_type} completed successfully with RMSE: {result.val_score}")
+                    await self._send_training_status_update("model_completed", {
+                        "model_type": model_type,
+                        "rmse": result.val_score,
+                        "status": "completed"
+                    })
+                else:
+                    logger.warning(f"Model {model_type} returned None result")
+                    await self._send_training_status_update("model_failed", {
+                        "model_type": model_type,
+                        "status": "failed",
+                        "error": "Model returned None result"
+                    })
                     
             except Exception as e:
-                logger.warning("Model training failed", 
-                             model_type=model_rec.model_type, 
-                             error=str(e))
+                logger.error("Error processing model result", 
+                           model_type=model_type, 
+                           error=str(e))
+                await self._send_training_status_update("model_failed", {
+                    "model_type": model_type,
+                    "status": "failed",
+                    "error": str(e)
+                })
                 continue
+        
+        # Send completion summary
+        await self._send_training_status_update("parallel_training_completed", {
+            "total_models": len(model_recommendations),
+            "successful_models": len(trained_models),
+            "failed_models": len(model_recommendations) - len(trained_models),
+            "models_completed": [model.family for model in trained_models]
+        })
         
         # Only create fallback if no models trained and no specific user selection
         if not trained_models:
@@ -703,6 +878,205 @@ class TimeSeriesTrainer:
         
         return best_model
     
+    async def _train_ts_model_with_progress(
+        self,
+        model_rec: ModelRecommendation,
+        train_df: pd.DataFrame,
+        test_df: pd.DataFrame,
+        data_pipeline: TimeSeriesDataPipeline,
+        forecast_horizon: int,
+        ts_characteristics: Dict[str, Any]
+    ) -> Optional[ModelArtifact]:
+        """Train a specific time series model with detailed progress tracking"""
+        
+        model_type = model_rec.model_type
+        
+        # Send initial training start update
+        await self._send_training_status_update("model_training_started", {
+            "model_type": model_type,
+            "status": "training",
+            "progress": 0
+        })
+        
+        try:
+            # Phase 1: Data preparation (10% progress)
+            await self._send_training_status_update("model_training_progress", {
+                "model_type": model_type,
+                "status": "training",
+                "progress": 10,
+                "phase": "data_preparation"
+            })
+            
+            target_col = data_pipeline.target_column
+            train_series = train_df[target_col].dropna()
+            test_series = test_df[target_col].dropna()
+            
+            # Phase 2: Model fitting (20-70% progress)
+            await self._send_training_status_update("model_training_progress", {
+                "model_type": model_type,
+                "status": "training",
+                "progress": 20,
+                "phase": "model_fitting"
+            })
+            
+            # Add realistic delay for UI visibility
+            await asyncio.sleep(1)
+            
+            forecaster = None
+            fit_info = None
+            
+            if model_type == "arima":
+                await self._send_training_status_update("model_training_progress", {
+                    "model_type": model_type,
+                    "status": "training",
+                    "progress": 30,
+                    "phase": "arima_parameter_search"
+                })
+                forecaster = ARIMAForecaster()
+                fit_info = forecaster.auto_fit(train_series)
+                
+                # Validate that ARIMA model was fitted successfully
+                if forecaster.fitted_model is None:
+                    raise ValueError("ARIMA model failed to fit")
+                
+                await self._send_training_status_update("model_training_progress", {
+                    "model_type": model_type,
+                    "status": "training",
+                    "progress": 60,
+                    "phase": "arima_fitting_complete"
+                })
+                
+            elif model_type == "simple_moving_average":
+                await self._send_training_status_update("model_training_progress", {
+                    "model_type": model_type,
+                    "status": "training",
+                    "progress": 40,
+                    "phase": "moving_average_calculation"
+                })
+                window = min(7, len(train_series) // 4)  # Adaptive window
+                forecaster = SimpleMovingAverageForecaster(window=window)
+                fit_info = forecaster.fit(train_series)
+                
+            elif model_type == "prophet" and PROPHET_AVAILABLE:
+                await self._send_training_status_update("model_training_progress", {
+                    "model_type": model_type,
+                    "status": "training",
+                    "progress": 35,
+                    "phase": "prophet_seasonality_detection"
+                })
+                forecaster = ProphetForecaster()
+                fit_info = forecaster.fit_with_seasonality(
+                    train_df, data_pipeline.date_column, target_col
+                )
+                await self._send_training_status_update("model_training_progress", {
+                    "model_type": model_type,
+                    "status": "training",
+                    "progress": 55,
+                    "phase": "prophet_fitting_complete"
+                })
+                
+            elif model_type == "exponential_smoothing":
+                await self._send_training_status_update("model_training_progress", {
+                    "model_type": model_type,
+                    "status": "training",
+                    "progress": 35,
+                    "phase": "exponential_smoothing_config"
+                })
+                forecaster = ExponentialSmoothingForecaster()
+                fit_info = forecaster.fit(train_series)
+                await self._send_training_status_update("model_training_progress", {
+                    "model_type": model_type,
+                    "status": "training",
+                    "progress": 55,
+                    "phase": "exponential_smoothing_complete"
+                })
+                
+            else:
+                logger.warning("Unsupported model type", model_type=model_type)
+                return None
+            
+            # Add delay after fitting
+            await asyncio.sleep(0.5)
+            
+            # Phase 3: Forecasting (70-80% progress)
+            await self._send_training_status_update("model_training_progress", {
+                "model_type": model_type,
+                "status": "training",
+                "progress": 70,
+                "phase": "forecasting"
+            })
+            
+            forecast_result = forecaster.forecast(len(test_series))
+            forecast = forecast_result["forecast"]
+            
+            # Validate forecast
+            if forecast is None or len(forecast) == 0:
+                raise ValueError(f"{model_type} forecast returned empty results")
+            
+            # Ensure forecast length matches test series length
+            if len(forecast) != len(test_series):
+                logger.warning(f"{model_type} forecast length mismatch: expected {len(test_series)}, got {len(forecast)}")
+                # Truncate or pad forecast to match test series length
+                if len(forecast) > len(test_series):
+                    forecast = forecast[:len(test_series)]
+                else:
+                    # Pad with last value
+                    last_val = forecast[-1] if len(forecast) > 0 else 0.0
+                    forecast = np.concatenate([forecast, np.full(len(test_series) - len(forecast), last_val)])
+            
+            # Phase 4: Evaluation (80-90% progress)
+            await self._send_training_status_update("model_training_progress", {
+                "model_type": model_type,
+                "status": "training",
+                "progress": 80,
+                "phase": "evaluation"
+            })
+            
+            seasonal_period = self._get_seasonal_period(ts_characteristics)
+            metrics = TimeSeriesMetrics.comprehensive_evaluation(
+                test_series.values, forecast, seasonal_period
+            )
+            
+            # Phase 5: Model saving (90-100% progress)
+            await self._send_training_status_update("model_training_progress", {
+                "model_type": model_type,
+                "status": "training",
+                "progress": 90,
+                "phase": "saving"
+            })
+            
+            model_path = self._save_ts_model(forecaster, f"{model_type}_{self.run_id}")
+            
+            # Final completion (100% progress)
+            await self._send_training_status_update("model_training_progress", {
+                "model_type": model_type,
+                "status": "training",
+                "progress": 100,
+                "phase": "completed"
+            })
+            
+            return ModelArtifact(
+                run_id=self.run_id,
+                family=model_type,
+                model_path=model_path,
+                val_score=metrics.get("rmse", 0.0),
+                train_score=0.0,  # Placeholder - we don't have train score for time series
+                feature_importance=None
+            )
+            
+        except Exception as e:
+            logger.error("Time series model training failed", 
+                        model_type=model_type, 
+                        error=str(e))
+            
+            # Send failure update
+            await self._send_training_status_update("model_training_failed", {
+                "model_type": model_type,
+                "status": "failed",
+                "error": str(e)
+            })
+            return None
+    
     async def _train_ts_model(
         self,
         model_rec: ModelRecommendation,
@@ -712,81 +1086,10 @@ class TimeSeriesTrainer:
         forecast_horizon: int,
         ts_characteristics: Dict[str, Any]
     ) -> Optional[ModelArtifact]:
-        """Train a specific time series model"""
-        
-        target_col = data_pipeline.target_column
-        train_series = train_df[target_col].dropna()
-        test_series = test_df[target_col].dropna()
-        
-        try:
-            if model_rec.model_type == "arima":
-                forecaster = ARIMAForecaster()
-                fit_info = forecaster.auto_fit(train_series)
-                
-                # Validate that ARIMA model was fitted successfully
-                if forecaster.fitted_model is None:
-                    raise ValueError("ARIMA model failed to fit")
-                
-                forecast_result = forecaster.forecast(len(test_series))
-                forecast = forecast_result["forecast"]
-                
-                # Validate forecast
-                if forecast is None or len(forecast) == 0:
-                    raise ValueError("ARIMA forecast returned empty results")
-                
-                # Ensure forecast length matches test series length
-                if len(forecast) != len(test_series):
-                    logger.warning(f"ARIMA forecast length mismatch: expected {len(test_series)}, got {len(forecast)}")
-                    # Truncate or pad forecast to match test series length
-                    if len(forecast) > len(test_series):
-                        forecast = forecast[:len(test_series)]
-                    else:
-                        # Pad with last value
-                        last_val = forecast[-1] if len(forecast) > 0 else 0.0
-                        forecast = np.concatenate([forecast, np.full(len(test_series) - len(forecast), last_val)])
-                
-            elif model_rec.model_type == "simple_moving_average":
-                window = min(7, len(train_series) // 4)  # Adaptive window
-                forecaster = SimpleMovingAverageForecaster(window=window)
-                fit_info = forecaster.fit(train_series)
-                forecast_result = forecaster.forecast(len(test_series))
-                forecast = forecast_result["forecast"]
-                
-            elif model_rec.model_type == "prophet" and PROPHET_AVAILABLE:
-                forecaster = ProphetForecaster()
-                fit_info = forecaster.fit_with_seasonality(
-                    train_df, data_pipeline.date_column, target_col
-                )
-                prophet_forecast = forecaster.forecast_with_uncertainty(len(test_series))
-                forecast = prophet_forecast['yhat'].values
-                
-            else:
-                logger.warning("Unsupported model type", model_type=model_rec.model_type)
-                return None
-            
-            # Evaluate model
-            seasonal_period = self._get_seasonal_period(ts_characteristics)
-            metrics = TimeSeriesMetrics.comprehensive_evaluation(
-                test_series.values, forecast, seasonal_period
-            )
-            
-            # Save model
-            model_path = self._save_ts_model(forecaster, f"{model_rec.model_type}_{self.run_id}")
-            
-            return ModelArtifact(
-                run_id=self.run_id,
-                family=model_rec.model_type,
-                model_path=model_path,
-                val_score=metrics.get("rmse", 0.0),
-                train_score=0.0,  # Placeholder - we don't have train score for time series
-                feature_importance=None
-            )
-            
-        except Exception as e:
-            logger.error("Time series model training failed", 
-                        model_type=model_rec.model_type, 
-                        error=str(e))
-            return None
+        """Train a specific time series model (legacy method for compatibility)"""
+        return await self._train_ts_model_with_progress(
+            model_rec, train_df, test_df, data_pipeline, forecast_horizon, ts_characteristics
+        )
     
     async def _create_fallback_model(
         self,
@@ -887,6 +1190,62 @@ class TimeSeriesTrainer:
         if self.websocket_manager:
             # Make sure data is JSON serializable
             serializable_data = self._make_json_serializable(data)
+            
+            # Format for UI compatibility - different formats for different status types
+            if "model_training_progress" in status or "model_training_started" in status:
+                # Send progress updates for individual models
+                model_type = data.get("model_type", "unknown")
+                progress = data.get("progress", 0)
+                phase = data.get("phase", "training")
+                
+                # Send as trial update for UI compatibility
+                await self.websocket_manager.broadcast_to_session(
+                    self.session_id,
+                    {
+                        "type": "trial_update",
+                        "family": model_type,
+                        "trial": max(1, progress // 20),  # Convert progress to trial number
+                        "val_metric": None,
+                        "elapsed_s": time.time() - getattr(self, 'start_time', time.time()),
+                        "message": f"{model_type}: {phase} ({progress}%)",
+                        "status": "running"
+                    }
+                )
+                
+            elif "model_completed" in status:
+                # Send completion update for individual models
+                model_type = data.get("model_type", "unknown")
+                rmse = data.get("rmse", 0)
+                
+                await self.websocket_manager.broadcast_to_session(
+                    self.session_id,
+                    {
+                        "type": "family_complete",
+                        "family": model_type,
+                        "val_metric": rmse,
+                        "status": "completed"
+                    }
+                )
+                
+            elif "model_failed" in status:
+                # Send failure update for individual models
+                model_type = data.get("model_type", "unknown")
+                error = data.get("error", "Unknown error")
+                
+                await self.websocket_manager.broadcast_to_session(
+                    self.session_id,
+                    {
+                        "type": "trial_update",
+                        "family": model_type,
+                        "trial": 1,
+                        "val_metric": None,
+                        "elapsed_s": time.time() - getattr(self, 'start_time', time.time()),
+                        "message": f"{model_type}: Failed - {error}",
+                        "status": "failed"
+                    }
+                )
+            
+            # Also send the original format for debugging
             await self.websocket_manager.broadcast_training_status(
                 self.session_id, 
                 {
