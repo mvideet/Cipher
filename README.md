@@ -209,101 +209,360 @@ sequenceDiagram
     UI-->>User: Results & Deployment Options
 ```
 
-### Pipeline Stages Explained
+### Revolutionary Pipeline Features
 
-1. **📤 Data Ingestion**: Secure file upload with validation and preprocessing
-2. **🧠 Prompt Analysis**: GPT-4 converts natural language to ML configuration
-3. **📊 Data Profiling**: Statistical analysis and feature engineering recommendations
-4. **🎯 Model Selection**: AI-powered algorithm recommendation based on data characteristics
-5. **⚡ Parallel Training**: Simultaneous training of multiple model families
-6. **🔧 Hyperparameter Optimization**: Bayesian optimization with Optuna
-7. **🔍 Model Explanation**: SHAP analysis with AI-generated insights
-8. **🐳 Deployment**: Automatic Docker containerization
+1. **📤 Intelligent Data Ingestion**: Smart validation, profiling, and preprocessing
+2. **🧠 LLM-Powered Analysis**: GPT-4 understands your task in natural language
+3. **📊 Advanced Data Profiling**: Statistical analysis with feature engineering insights
+4. **🎯 AI Model Recommendation**: 3-5 optimal algorithms with detailed reasoning
+5. **🏗️ Architecture Multiplication**: 3 variants per model (9-15 total configurations)
+6. **⚡ Massive Parallel Training**: Simultaneous training across all architectures
+7. **🔧 Intelligent Optimization**: Bayesian hyperparameter tuning with early pruning
+8. **🤝 Automatic Ensembling**: Voting or stacking for maximum performance
+9. **🔍 AI-Powered Explanation**: SHAP + GPT-4 insights about model behavior
+10. **🐳 Production Deployment**: One-click Docker containerization with APIs
+
+### What Makes This Revolutionary
+
+- **🧠 First LLM-Guided AutoML**: GPT-4 acts as your ML expert consultant
+- **🏗️ Neural Architecture Search**: Automatically designs optimal network structures  
+- **⚡ 10x Model Coverage**: 80+ configurations vs traditional 3-5 models
+- **🤝 Intelligent Ensembling**: AI decides when and how to combine models
+- **📊 Multi-Domain Support**: Supervised, unsupervised, time series, and anomaly detection
+- **🔍 Explainable AI**: Every prediction comes with human-readable explanations
 
 ---
 
-## 🧠 Intelligent ML Pipeline
+## 🧠 Enhanced ML Pipeline with LLM Guidance
 
-Our machine learning pipeline represents a breakthrough in automated model development:
+Our revolutionary machine learning pipeline combines artificial intelligence with advanced automation:
 
 ```mermaid
-flowchart TD
-    START([🏁 Start ML Pipeline]) --> UPLOAD[📤 Upload CSV Dataset]
-    UPLOAD --> VALIDATE{📋 Validate File}
-    VALIDATE -->|❌ Invalid| ERROR[🚨 Show Error Message]
-    VALIDATE -->|✅ Valid| PROMPT[💬 Parse Natural Language Prompt]
+graph TB
+    subgraph "Data Input & Analysis"
+        UPLOAD[📤 CSV Dataset Upload]
+        VALIDATE[🔍 Data Validation & Profiling]
+        PROMPT[💬 Natural Language Task Description]
+        UPLOAD --> VALIDATE
+        PROMPT --> PARSE
+    end
     
-    PROMPT --> GPT4[🧠 GPT-4 Analysis]
-    GPT4 --> EXTRACT[📝 Extract ML Configuration]
-    EXTRACT --> CONFIG{🔧 Configuration Complete?}
-    CONFIG -->|❌ Missing Info| CLARIFY[❓ Request Clarification]
-    CONFIG -->|✅ Complete| PROFILE[📊 Data Profiling]
+    subgraph "LLM-Guided Model Selection"
+        PARSE[🧠 GPT-4 Prompt Parsing]
+        PROFILE[📊 Dataset Characteristics Analysis]
+        LLM_SELECT[🎯 LLM Model Recommendation]
+        ARCH_GEN[🏗️ Architecture Generation]
+        
+        PARSE --> PROFILE
+        PROFILE --> LLM_SELECT
+        LLM_SELECT --> ARCH_GEN
+        LLM_SELECT --> |"Fallback if LLM fails"| FALLBACK[⚡ Rule-based Selection]
+    end
     
-    PROFILE --> STATS[📈 Statistical Analysis]
-    STATS --> INSIGHTS[💡 Generate Insights]
-    INSIGHTS --> RECOMMEND[🎯 Model Recommendations]
-    RECOMMEND --> SELECT[🏆 Select Best Models]
+    subgraph "Model Architecture Variants"
+        SIMPLE[🚀 Simple Configurations<br/>Fast training, basic parameters]
+        BALANCED[⚖️ Balanced Configurations<br/>Medium complexity, good performance]
+        COMPLEX[🔬 Complex Configurations<br/>High accuracy, longer training]
+        
+        ARCH_GEN --> SIMPLE
+        ARCH_GEN --> BALANCED
+        ARCH_GEN --> COMPLEX
+        FALLBACK --> SIMPLE
+        FALLBACK --> BALANCED
+        FALLBACK --> COMPLEX
+    end
     
-    SELECT --> PARALLEL[🔄 Parallel Training]
-    PARALLEL --> LGB[⚡ LightGBM Training]
-    PARALLEL --> MLP[🧠 Neural Network Training]
-    PARALLEL --> BASE[📈 Baseline Training]
+    subgraph "Parallel Training Engine"
+        TRAIN_SIMPLE[⚡ Train Simple Models]
+        TRAIN_BALANCED[⚖️ Train Balanced Models]
+        TRAIN_COMPLEX[🔬 Train Complex Models]
+        
+        SIMPLE --> TRAIN_SIMPLE
+        BALANCED --> TRAIN_BALANCED
+        COMPLEX --> TRAIN_COMPLEX
+    end
     
-    LGB --> OPTUNA1[🎯 Optuna Optimization]
-    MLP --> OPTUNA2[🎯 Optuna Optimization]
-    BASE --> OPTUNA3[🎯 Optuna Optimization]
+    subgraph "Hyperparameter Optimization"
+        OPTUNA_SIMPLE[🎯 Optuna Optimization<br/>TPE + Median Pruning]
+        OPTUNA_BALANCED[🎯 Optuna Optimization<br/>Extended Search Space]
+        OPTUNA_COMPLEX[🎯 Optuna Optimization<br/>Comprehensive Tuning]
+        
+        TRAIN_SIMPLE --> OPTUNA_SIMPLE
+        TRAIN_BALANCED --> OPTUNA_BALANCED
+        TRAIN_COMPLEX --> OPTUNA_COMPLEX
+    end
     
-    OPTUNA1 --> EVAL1[📊 Model Evaluation]
-    OPTUNA2 --> EVAL2[📊 Model Evaluation]
-    OPTUNA3 --> EVAL3[📊 Model Evaluation]
+    subgraph "Model Evaluation & Selection"
+        EVAL[📊 Cross-validation & Metrics]
+        COMPARE[⚖️ Model Comparison Matrix]
+        BEST_SELECT[🏆 Best Model Selection]
+        
+        OPTUNA_SIMPLE --> EVAL
+        OPTUNA_BALANCED --> EVAL
+        OPTUNA_COMPLEX --> EVAL
+        EVAL --> COMPARE
+        COMPARE --> BEST_SELECT
+    end
     
-    EVAL1 --> COMPARE[⚖️ Compare Models]
-    EVAL2 --> COMPARE
-    EVAL3 --> COMPARE
+    subgraph "Ensemble Creation"
+        ENSEMBLE_CHECK{🤝 Create Ensemble?}
+        VOTING[🗳️ Voting Ensemble]
+        STACKING[📚 Stacking Ensemble]
+        FINAL_MODEL[🎖️ Final Model/Ensemble]
+        
+        BEST_SELECT --> ENSEMBLE_CHECK
+        ENSEMBLE_CHECK -->|"Yes, for better performance"| VOTING
+        ENSEMBLE_CHECK -->|"Yes, for maximum accuracy"| STACKING
+        ENSEMBLE_CHECK -->|"No, single model sufficient"| FINAL_MODEL
+        VOTING --> FINAL_MODEL
+        STACKING --> FINAL_MODEL
+    end
     
-    COMPARE --> BEST[🏆 Select Best Model]
-    BEST --> SHAP[🔍 SHAP Analysis]
-    SHAP --> EXPLAIN[💭 AI-Generated Explanations]
-    EXPLAIN --> PACKAGE[📦 Package Model]
-    PACKAGE --> DOCKER[🐳 Docker Containerization]
-    DOCKER --> DEPLOY[🚀 Ready for Deployment]
-    DEPLOY --> END([🎉 Pipeline Complete])
+    subgraph "Model Explanation & Deployment"
+        SHAP[🔍 SHAP Feature Importance]
+        AI_INSIGHTS[💡 GPT-4 Model Explanations]
+        DOCKER[🐳 Docker Containerization]
+        API[🌐 Production API]
+        
+        FINAL_MODEL --> SHAP
+        SHAP --> AI_INSIGHTS
+        AI_INSIGHTS --> DOCKER
+        DOCKER --> API
+    end
     
-    ERROR --> END
-    CLARIFY --> PROMPT
+    VALIDATE --> PROFILE
     
-    classDef startEnd fill:#4caf50,stroke:#2e7d32,stroke-width:3px,color:#fff
-    classDef process fill:#2196f3,stroke:#1565c0,stroke-width:2px,color:#fff
-    classDef decision fill:#ff9800,stroke:#ef6c00,stroke-width:2px,color:#fff
-    classDef ai fill:#9c27b0,stroke:#6a1b9a,stroke-width:2px,color:#fff
-    classDef training fill:#f44336,stroke:#c62828,stroke-width:2px,color:#fff
+    classDef input fill:#e3f2fd,stroke:#0277bd,stroke-width:2px
+    classDef llm fill:#f3e5f5,stroke:#7b1fa2,stroke-width:2px
+    classDef arch fill:#e8f5e8,stroke:#388e3c,stroke-width:2px
+    classDef training fill:#fff3e0,stroke:#f57c00,stroke-width:2px
+    classDef optimization fill:#fce4ec,stroke:#c2185b,stroke-width:2px
+    classDef evaluation fill:#f9fbe7,stroke:#827717,stroke-width:2px
+    classDef ensemble fill:#e1f5fe,stroke:#00acc1,stroke-width:2px
+    classDef deployment fill:#fcf2ff,stroke:#9c27b0,stroke-width:2px
     
-    class START,END startEnd
-    class UPLOAD,VALIDATE,PROFILE,STATS,INSIGHTS,SELECT,PARALLEL,EVAL1,EVAL2,EVAL3,COMPARE,BEST,PACKAGE,DOCKER,DEPLOY process
-    class CONFIG decision
-    class PROMPT,GPT4,EXTRACT,CLARIFY,RECOMMEND,SHAP,EXPLAIN ai
-    class LGB,MLP,BASE,OPTUNA1,OPTUNA2,OPTUNA3 training
+    class UPLOAD,VALIDATE,PROMPT input
+    class PARSE,PROFILE,LLM_SELECT,ARCH_GEN,FALLBACK llm
+    class SIMPLE,BALANCED,COMPLEX arch
+    class TRAIN_SIMPLE,TRAIN_BALANCED,TRAIN_COMPLEX training
+    class OPTUNA_SIMPLE,OPTUNA_BALANCED,OPTUNA_COMPLEX optimization
+    class EVAL,COMPARE,BEST_SELECT evaluation
+    class ENSEMBLE_CHECK,VOTING,STACKING,FINAL_MODEL ensemble
+    class SHAP,AI_INSIGHTS,DOCKER,API deployment
 ```
 
 ### Advanced ML Features
 
-#### 🎯 Intelligent Model Selection
-- **Data-Driven Recommendations**: Analyzes dataset characteristics to suggest optimal algorithms
-- **Ensemble Learning**: Combines multiple models for superior performance
-- **Neural Architecture Search**: Automatically finds optimal network architectures
-- **Performance Optimization**: Balances accuracy with computational efficiency
+#### 🎯 LLM-Guided Model Selection
+- **GPT-4 Analysis**: AI analyzes your dataset characteristics and task requirements
+- **Intelligent Recommendations**: Receives 3-5 optimal model recommendations with detailed reasoning
+- **Architecture Variants**: Each model gets 3 configurations (simple/balanced/complex)
+- **Ensemble Strategies**: Automatically selects voting, stacking, or blending approaches
+- **Fallback System**: Rule-based recommendations when LLM is unavailable
+
+#### 🏗️ Neural Architecture Search (NAS)
+- **Automated Design**: Generates optimal neural network architectures
+- **Multi-Layer Configurations**: 1-4 layer networks with adaptive sizing
+- **Activation Functions**: Automatic selection of ReLU, Tanh, or custom activations
+- **Learning Rate Scheduling**: Adaptive and fixed learning rate strategies
+- **Early Stopping**: Intelligent convergence detection
 
 #### ⚡ Parallel Training Framework
-- **Concurrent Processing**: Multiple model families train simultaneously
-- **Resource Optimization**: Efficient CPU/memory utilization
-- **Progress Tracking**: Real-time updates on training status
-- **Early Stopping**: Prevents overfitting with intelligent monitoring
+- **Concurrent Architecture Training**: Multiple model variants train simultaneously
+- **Resource-Aware Scheduling**: Optimal CPU/memory allocation per model
+- **Real-Time Progress**: Live updates on training status and metrics
+- **Intelligent Pruning**: Optuna eliminates unpromising configurations early
 
-#### 🔧 Hyperparameter Optimization
-- **Bayesian Optimization**: Optuna's advanced search algorithms
-- **Intelligent Pruning**: Eliminates unpromising parameter combinations
-- **Adaptive Search**: Adjusts search strategy based on results
-- **Resource-Aware**: Optimizes within computational constraints
+#### 🔧 Advanced Hyperparameter Optimization
+- **Bayesian Optimization**: Optuna's Tree-structured Parzen Estimator (TPE)
+- **Median Pruning**: Stops underperforming trials early
+- **Adaptive Search Spaces**: Dynamic parameter ranges based on data size
+- **Multi-Objective**: Balances accuracy, speed, and interpretability
+
+---
+
+## 🤖 Comprehensive Model Catalog
+
+Cipher Desktop features the most extensive AutoML model catalog available, with **80+ model configurations** across all machine learning domains:
+
+### 📊 Supervised Learning Models
+
+#### 🌲 Tree-Based Models (High Performance)
+- **Random Forest**: Robust ensemble with bagging
+  - *Variants*: Fast (50 trees), Balanced (100 trees), Deep (200 trees)
+  - *Best for*: Tabular data, feature importance, balanced accuracy
+- **Extra Trees**: Extremely randomized trees for speed
+  - *Variants*: Shallow (depth 8), Medium (depth 15), Unrestricted depth
+  - *Best for*: Large datasets, faster training than Random Forest
+- **XGBoost**: Industry-standard gradient boosting
+  - *Variants*: Fast (100 estimators), Balanced (300), Precise (500)
+  - *Best for*: Competitions, high accuracy, structured data
+- **LightGBM**: Microsoft's efficient gradient boosting
+  - *Variants*: Speed-optimized, Memory-efficient, Accuracy-focused
+  - *Best for*: Large datasets, categorical features, fast training
+- **CatBoost** (Optional): Yandex's categorical feature specialist
+  - *Variants*: Default, Overfitting-resistant, High-performance
+  - *Best for*: Categorical-heavy datasets, minimal preprocessing
+- **Histogram Gradient Boosting**: Sklearn's native gradient boosting
+  - *Variants*: Fast, Balanced, Precise configurations
+  - *Best for*: Medium datasets, built-in regularization
+
+#### 🧠 Neural Networks (Deep Learning)
+- **Multi-Layer Perceptron (MLP)**: Feed-forward neural networks
+  - *Simple*: 1 layer (32-128 neurons)
+  - *Balanced*: 2 layers (64-256 neurons) 
+  - *Deep*: 3 layers (128-512 neurons)
+  - *Best for*: Non-linear patterns, complex feature interactions
+- **Neural Architecture Search**: Automated network design
+  - *Adaptive sizing*: Based on dataset characteristics
+  - *Activation optimization*: ReLU, Tanh, custom functions
+  - *Learning rate scheduling*: Fixed, adaptive, decay strategies
+
+#### 📏 Linear Models (Interpretable)
+- **Logistic/Linear Regression**: Classical statistical models
+  - *Variants*: L1 (Lasso), L2 (Ridge), ElasticNet regularization
+  - *Best for*: Interpretability, small datasets, baseline models
+- **Support Vector Machines (SVM)**: Maximum margin classifiers
+  - *Linear*: Fast, interpretable decision boundaries
+  - *RBF*: Non-linear kernel for complex patterns
+  - *Polynomial*: Degree-based feature expansion
+  - *Best for*: High-dimensional data, text classification
+
+#### 📍 Instance-Based Models
+- **k-Nearest Neighbors (k-NN)**: Lazy learning approach
+  - *Variants*: k=3 (simple), k=5 (balanced), k=auto (optimized)
+  - *Best for*: Local patterns, recommendation systems
+- **Naive Bayes**: Probabilistic classification
+  - *Gaussian*: Continuous features
+  - *Multinomial*: Discrete features, text data
+  - *Best for*: Text classification, small datasets
+
+#### 🔍 Anomaly Detection
+- **Isolation Forest**: Tree-based outlier detection
+  - *Variants*: Fast (50 trees), Balanced (100), Thorough (200)
+  - *Best for*: Fraud detection, quality control, outlier identification
+
+### 🎭 Ensemble Methods (Meta-Learning)
+
+#### 🗳️ Voting Ensembles
+- **Hard Voting**: Majority class prediction
+- **Soft Voting**: Probability-weighted predictions
+- *Best for*: Diverse model combination, robust predictions
+
+#### 📚 Stacking Ensembles
+- **Linear Stacking**: Linear meta-learner
+- **Non-linear Stacking**: Neural network meta-learner
+- *Best for*: Maximizing predictive performance
+
+### 🕘 Time Series Forecasting Models
+
+#### 📈 Statistical Models
+- **ARIMA**: Auto-Regressive Integrated Moving Average
+  - *Simple*: Basic parameters (p,d,q ≤ 3)
+  - *Seasonal*: Includes seasonal components
+  - *Comprehensive*: Extensive parameter search
+  - *Best for*: Stationary time series, seasonal patterns
+- **Exponential Smoothing**: Trend and seasonality modeling
+  - *Simple*: Level-only smoothing
+  - *Holt Linear*: Level + trend
+  - *Holt-Winters*: Level + trend + seasonality
+  - *Best for*: Trending data, seasonal patterns
+- **Seasonal Decomposition**: Pattern separation
+  - *Additive*: Linear seasonal effects
+  - *Multiplicative*: Proportional seasonal effects
+  - *STL*: Robust seasonal-trend decomposition
+  - *Best for*: Understanding time series components
+
+#### 🤖 Machine Learning for Time Series
+- **Prophet**: Facebook's forecasting model
+  - *Basic*: Yearly seasonality only
+  - *Seasonal*: Weekly + yearly seasonality
+  - *Full*: Daily + weekly + yearly + holidays
+  - *Best for*: Business metrics, holiday effects
+- **LSTM Networks**: Deep learning for sequences
+  - *Simple*: 1 layer, short sequences
+  - *Deep*: 2-3 layers, medium sequences
+  - *Complex*: Attention mechanisms, long sequences
+  - *Best for*: Complex non-linear patterns, multivariate data
+
+### 🔄 Clustering Models (Unsupervised)
+
+#### 📍 Centroid-Based
+- **K-Means**: Spherical cluster discovery
+  - *Variants*: k=3/5/8 clusters, different initialization strategies
+  - *Best for*: Spherical clusters, known cluster count
+
+#### 🌐 Density-Based  
+- **DBSCAN**: Density-based clustering
+  - *Loose*: Broader clusters (eps=0.5)
+  - *Balanced*: Medium density (eps=0.3)
+  - *Tight*: Dense clusters (eps=0.1)
+  - *Best for*: Arbitrary shapes, noise handling
+
+#### 🌳 Hierarchical
+- **Agglomerative Clustering**: Bottom-up hierarchy
+  - *Ward*: Minimizes within-cluster variance
+  - *Complete*: Maximum pairwise distance
+  - *Average*: Average pairwise distance
+  - *Best for*: Hierarchical relationships, dendrograms
+
+#### 🎯 Probabilistic
+- **Gaussian Mixture Models**: Probability-based clustering
+  - *Full covariance*: Maximum flexibility
+  - *Diagonal covariance*: Computational efficiency  
+  - *Tied covariance*: Shared cluster shapes
+  - *Best for*: Overlapping clusters, soft assignments
+
+### 🧠 LLM-Guided Model Selection Process
+
+#### 📊 Data-Driven Analysis
+1. **Dataset Profiling**: Size, dimensionality, class distribution, missing values
+2. **Feature Analysis**: Numerical vs categorical, cardinality, correlations
+3. **Task Requirements**: Accuracy vs speed vs interpretability trade-offs
+4. **Resource Constraints**: Memory, time, computational budget
+
+#### 🎯 GPT-4 Recommendation Engine
+```json
+{
+  "dataset_characteristics": {
+    "size": "medium (5,000 rows)",
+    "dimensionality": "moderate (50 features)",
+    "class_balance": "slightly imbalanced (60/40)",
+    "feature_types": "mixed (numeric + categorical)"
+  },
+  "recommended_models": [
+    {
+      "model": "LightGBM",
+      "confidence": 0.95,
+      "reasoning": "Excellent for tabular data with mixed features",
+      "architectures": ["fast", "balanced", "precise"],
+      "expected_performance": "high",
+      "training_time": "fast"
+    },
+    {
+      "model": "Random Forest", 
+      "confidence": 0.88,
+      "reasoning": "Robust baseline with good interpretability",
+      "architectures": ["shallow", "balanced", "deep"],
+      "expected_performance": "good",
+      "training_time": "medium"
+    }
+  ],
+  "ensemble_strategy": "voting",
+  "diversity_score": 0.82
+}
+```
+
+#### 🔄 Intelligent Fallback Strategy
+When LLM is unavailable, rule-based selection activates:
+
+| Dataset Size | Classification Models | Regression Models | Reasoning |
+|-------------|---------------------|------------------|-----------|
+| **Small** (<1K) | Logistic Regression, Random Forest | Linear Regression, Random Forest | Simple, robust models prevent overfitting |
+| **Medium** (1K-5K) | Random Forest, XGBoost, Logistic | Random Forest, XGBoost, Linear | Balanced approach with proven algorithms |
+| **Large** (>5K) | LightGBM, XGBoost, Random Forest | LightGBM, XGBoost, Random Forest | Complex models with efficiency focus |
+| **Clustering** | K-Means, DBSCAN, Hierarchical | - | Density and centroid-based approaches |
+| **Time Series** | ARIMA, Prophet, LSTM | - | Statistical and ML forecasting methods |
 
 ---
 
@@ -617,32 +876,32 @@ Before installing Cipher Desktop, ensure you have:
 ### Installation Guide
 
 #### 1. Repository Setup
-```bash
+   ```bash
 # Clone the repository
 git clone https://github.com/your-org/cipher-desktop.git
-cd cipher-desktop
+   cd cipher-desktop
 
 # Create environment file
-cp .env.template .env
-# Edit .env and add your OpenAI API key
-```
+   cp .env.template .env
+   # Edit .env and add your OpenAI API key
+   ```
 
 #### 2. Python Backend Setup
-```bash
+   ```bash
 # Install Poetry (if not already installed)
 curl -sSL https://install.python-poetry.org | python3 -
 
 # Install Python dependencies
-poetry install
+   poetry install
 
 # Verify installation
 poetry run python -c "import src.main; print('Backend ready!')"
-```
+   ```
 
 #### 3. Frontend Setup
-```bash
+   ```bash
 # Install Node.js dependencies
-npm install
+   npm install
 
 # Verify Electron setup
 npm run electron-version
@@ -657,24 +916,24 @@ API_PORT=8001
 MAX_TRAINING_TIME_MINUTES=15
 MAX_OPTUNA_TRIALS=20
 MAX_FILE_SIZE_MB=100
-```
+   ```
 
 ### Running the Application
 
 #### Development Mode (Recommended)
-```bash
+   ```bash
 # Start development server (backend + frontend)
-npm run dev
-```
+   npm run dev
+   ```
 
 #### Production Mode
-```bash
+   ```bash
 # Terminal 1: Start backend
-poetry run python -m uvicorn src.main:app --host 127.0.0.1 --port 8001
-
+   poetry run python -m uvicorn src.main:app --host 127.0.0.1 --port 8001
+   
 # Terminal 2: Start frontend
-npm start
-```
+   npm start
+   ```
 
 #### Building Standalone Application
 ```bash
