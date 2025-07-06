@@ -937,6 +937,11 @@ async def _run_enhanced_training_with_selection(
             if hasattr(trainer, 'forecast_data'):
                 forecast_data = trainer.forecast_data
             
+            # Get all model performances from the trainer
+            all_model_performances = []
+            if hasattr(trainer, 'all_model_performances'):
+                all_model_performances = trainer.all_model_performances
+            
             # Send completion notification for time series
             completion_data = {
                 "forecasting_results": True,  # Mark as forecasting
@@ -949,7 +954,8 @@ async def _run_enhanced_training_with_selection(
                 },
                 "model_path": result.model_path,
                 "selected_models": selected_model_types,
-                "training_method": "time_series_forecasting"
+                "training_method": "time_series_forecasting",
+                "all_models": all_model_performances  # Include all model performances
             }
             
             # Add forecast data if available

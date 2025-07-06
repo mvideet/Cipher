@@ -777,6 +777,7 @@ class TimeSeriesTrainer:
         # Train models in parallel with progress tracking
         trained_models = []
         training_tasks = []
+        all_model_performances = []  # Initialize here to collect all model results
         
         # Send initial training start update
         await self._send_training_status_update("parallel_training_started", {
@@ -810,6 +811,13 @@ class TimeSeriesTrainer:
                         "status": "failed",
                         "error": str(result)
                     })
+                    # Add failed model to collection for UI display
+                    all_model_performances.append({
+                        "model_type": model_type,
+                        "rmse": float('inf'),  # High RMSE to indicate failure
+                        "status": "failed",
+                        "error": str(result)
+                    })
                 elif result is not None:
                     trained_models.append(result)
                     logger.info(f"Model {model_type} completed successfully with RMSE: {result.val_score}")
@@ -818,10 +826,23 @@ class TimeSeriesTrainer:
                         "rmse": result.val_score,
                         "status": "completed"
                     })
+                    # Add successful model to collection for UI display
+                    all_model_performances.append({
+                        "model_type": model_type,
+                        "rmse": result.val_score,
+                        "status": "completed"
+                    })
                 else:
                     logger.warning(f"Model {model_type} returned None result")
                     await self._send_training_status_update("model_failed", {
                         "model_type": model_type,
+                        "status": "failed",
+                        "error": "Model returned None result"
+                    })
+                    # Add failed model to collection for UI display
+                    all_model_performances.append({
+                        "model_type": model_type,
+                        "rmse": float('inf'),  # High RMSE to indicate failure
                         "status": "failed",
                         "error": "Model returned None result"
                     })
@@ -870,10 +891,14 @@ class TimeSeriesTrainer:
         # Store forecast data for later retrieval
         self.forecast_data = forecast_data
         
+        # Store all model performances for later retrieval (collected during training loop)
+        self.all_model_performances = all_model_performances
+        
         await self._send_training_status_update("training_complete", {
             "best_model": best_model.family,
             "performance": {"rmse": best_model.val_score},
-            "forecast_data": forecast_data
+            "forecast_data": forecast_data,
+            "all_models": all_model_performances
         })
         
         return best_model

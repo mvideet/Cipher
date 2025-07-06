@@ -461,7 +461,7 @@ class UIManager {
     handleTrainingStarted(result, enhanced = false) {
         this.trainingStartTime = Date.now();
         // Auto-detect enhanced mode from result data if not explicitly set
-        if (!enhanced && (result.enhanced_features || result.recommendations || result.ensemble_strategy)) {
+        if (!enhanced && (result.enhanced_features || result.recommendations || result.ensemble_strategy || result.selected_models)) {
             enhanced = true;
         }
         this.isEnhancedMode = enhanced;
@@ -1705,6 +1705,28 @@ class UIManager {
             
             // Show forecasting-specific visualization
             this.showForecastingResults(results);
+            
+            // If we have individual model results, show them
+            if (results.all_models && Array.isArray(results.all_models)) {
+                console.log('📊 Displaying individual model results:', results.all_models);
+                
+                // Ensure we're in enhanced mode to show individual cards
+                this.isEnhancedMode = true;
+                
+                // Initialize enhanced progress if not already done
+                if (!document.getElementById('enhancedModelProgress')) {
+                    this.initializeEnhancedFamilyProgress();
+                }
+                
+                // Update each model card with final results
+                results.all_models.forEach(model => {
+                    this.updateEnhancedModelProgress(model.model_type, {
+                        trial: 5,
+                        status: 'completed',
+                        val_metric: model.rmse
+                    });
+                });
+            }
             
             this.showNotification('success', 'Forecasting Complete', `Best model: ${bestModel.family} with RMSE ${formatNumber(bestModel.val_score)}`);
         } else if (results.best_model) {

@@ -165,6 +165,17 @@ class CipherApp {
         
         // Check if this is forecasting training
         if (data.forecasting_results) {
+            // Update individual model cards with completion status
+            if (data.all_models && Array.isArray(data.all_models)) {
+                data.all_models.forEach(model => {
+                    uiManager.updateEnhancedModelProgress(model.model_type, {
+                        trial: 5, // Mark as completed
+                        status: 'completed',
+                        val_metric: model.rmse
+                    });
+                });
+            }
+            
             // Show forecasting training results
             uiManager.showTrainingResults(data);
         } else if (data.enhanced_results) {
@@ -400,12 +411,20 @@ class CipherApp {
     // Handle training start event
     handleTrainingStart(data) {
         console.log('Training start received:', data);
+        
+        // Check if enhanced mode by looking for enhanced features, recommendations, or selected models
+        const isEnhanced = data.enhanced_features || data.recommendations || data.ensemble_strategy || data.selected_models;
+        
+        // Handle training started with enhanced mode detection
+        uiManager.handleTrainingStarted(data, isEnhanced);
+        
+        // Add training log
         uiManager.addTrainingLog({
-            family: data.model,
+            family: data.model || 'Training',
             trial: 0,
             val_metric: null,
             elapsed_s: 0,
-            message: data.message
+            message: data.message || 'Training started'
         });
     }
 
